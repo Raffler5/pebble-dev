@@ -49,9 +49,17 @@ const uint8_t DM_FONT_5X7[128][7] = {
     ['Z'] = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F},
 };
 
-// 8x11 bus icon — same bitmap as SmallTV-Ultra / ESP32-S3
-const uint8_t DM_BUS_ICON[11] = {
-    0x7E, 0xC3, 0xFF, 0x81, 0x81, 0x81, 0x81, 0xFF, 0xBD, 0xFF, 0x42,
+// 6x7 bus icon — fits the 5x7 font grid so it aligns with text rows.
+// 6 columns wide, each byte is a row (MSB-first, top 6 bits used).
+//   ░█████░   0x7C
+//   █░░░░█   0x84
+//   ██████   0xFC
+//   █░░░░█   0x84
+//   ██████   0xFC
+//   █░██░█   0xB4
+//   ░█░░█░   0x48
+const uint8_t DM_BUS_ICON[7] = {
+    0x7C, 0x84, 0xFC, 0x84, 0xFC, 0xB4, 0x48,
 };
 
 int dm_char_width(uint8_t dot_size) {
@@ -140,9 +148,9 @@ void dm_bus_icon(GContext *ctx, int x, int y, uint8_t dot_size, GColor color) {
     int pitch = dot_size + 1;
     graphics_context_set_fill_color(ctx, color);
 
-    for (int row = 0; row < 11; row++) {
+    for (int row = 0; row < 7; row++) {
         uint8_t bits = DM_BUS_ICON[row];
-        for (int col = 0; col < 8; col++) {
+        for (int col = 0; col < 6; col++) {
             if (bits & (0x80 >> col)) {
                 graphics_fill_rect(ctx,
                     GRect(x + col * pitch, y + row * pitch, dot_size, dot_size),

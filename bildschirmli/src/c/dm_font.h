@@ -6,8 +6,8 @@
 // Lowercase / accents must be folded by dm_sanitize() before drawing.
 extern const uint8_t DM_FONT_5X7[128][7];
 
-// 8x11 bus icon bitmap (drawn when ETA = "NOW")
-extern const uint8_t DM_BUS_ICON[11];
+// 6x7 bus icon — fits the 5x7 font grid (same row height as text)
+extern const uint8_t DM_BUS_ICON[7];
 
 // Dot sizes — platform-adaptive
 #ifdef PBL_PLATFORM_EMERY

@@ -321,7 +321,6 @@ static void deps_window_load(Window *window) {
 }
 
 static void deps_window_unload(Window *window) {
-    // Clean up everything — window will be destroyed after this
     accel_tap_service_unsubscribe();
     if (s_refresh_timer) {
         app_timer_cancel(s_refresh_timer);
@@ -333,6 +332,11 @@ static void deps_window_unload(Window *window) {
     // Destroy the window itself (SwissTP pattern)
     window_destroy(window);
     s_deps_window = NULL;
+
+    // Force picker to redraw now that it's the top window again
+    if (s_picker_layer) {
+        layer_mark_dirty(s_picker_layer);
+    }
 }
 
 // Create and push a fresh departure window
@@ -414,6 +418,18 @@ static void picker_window_load(Window *window) {
     layer_add_child(root, s_picker_layer);
 }
 
+static void picker_window_appear(Window *window) {
+    // Force redraw when returning from departure screen
+    if (s_picker_layer) {
+        layer_mark_dirty(s_picker_layer);
+    }
+    // Also mark the root layer dirty as a fallback
+    Layer *root = window_get_root_layer(window);
+    if (root) {
+        layer_mark_dirty(root);
+    }
+}
+
 static void picker_window_unload(Window *window) {
     layer_destroy(s_picker_layer);
     s_picker_layer = NULL;
@@ -433,6 +449,7 @@ static void init(void) {
     window_set_click_config_provider(s_picker_window, picker_click_config);
     window_set_window_handlers(s_picker_window, (WindowHandlers) {
         .load = picker_window_load,
+        .appear = picker_window_appear,
         .unload = picker_window_unload,
     });
     window_stack_push(s_picker_window, true);
