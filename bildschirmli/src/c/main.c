@@ -385,8 +385,10 @@ static void picker_select_handler(ClickRecognizerRef ref, void *ctx) {
     const char *id = s_stations.stations[s_stations.selected].id;
     s_status = STATUS_LOADING_DEPS;
 
-    // Push departure window
-    window_stack_push(s_deps_window, true);
+    // Only push if not already on the stack (avoid double-push)
+    if (window_stack_get_top_window() != s_deps_window) {
+        window_stack_push(s_deps_window, true);
+    }
 
     request_departures(id);
 }
