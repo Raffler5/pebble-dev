@@ -429,6 +429,11 @@ static void picker_window_load(Window *window) {
     layer_add_child(root, s_picker_layer);
 }
 
+static void picker_window_appear(Window *window) {
+    // Redraw when returning from departure screen
+    if (s_picker_layer) layer_mark_dirty(s_picker_layer);
+}
+
 static void picker_window_unload(Window *window) {
     layer_destroy(s_picker_layer);
     s_picker_layer = NULL;
@@ -449,6 +454,7 @@ static void init(void) {
     window_set_window_handlers(s_picker_window, (WindowHandlers) {
         .load = picker_window_load,
         .unload = picker_window_unload,
+        .appear = picker_window_appear,
     });
 
     // Departure window (pushed on station select)
