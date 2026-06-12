@@ -308,10 +308,16 @@ static void deps_down_handler(ClickRecognizerRef ref, void *ctx) {
     }
 }
 
+static void deps_back_handler(ClickRecognizerRef ref, void *ctx) {
+    // Pop back to station picker
+    window_stack_pop(true);
+}
+
 static void deps_click_config(void *context) {
     window_single_click_subscribe(BUTTON_ID_SELECT, deps_select_handler);
     window_single_click_subscribe(BUTTON_ID_UP, deps_up_handler);
     window_single_click_subscribe(BUTTON_ID_DOWN, deps_down_handler);
+    window_single_click_subscribe(BUTTON_ID_BACK, deps_back_handler);
 }
 
 static void deps_tap_handler(AccelAxisType axis, int32_t direction) {
