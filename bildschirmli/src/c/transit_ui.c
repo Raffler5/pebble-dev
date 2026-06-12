@@ -92,10 +92,11 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
 
         // ETA
         if (strcmp(dep->eta, "0") == 0) {
-            // Bus icon for "departing now"
-            int pitch = DM_ROW_DOT + 1;
-            int icon_w = 8 * pitch;
-            dm_bus_icon(ctx, w - DM_MARGIN_X - icon_w, y - 1, DM_ROW_DOT, amber);
+            // "NOW" text instead of bus icon (icon is too tall for row height)
+            char snow[] = "NOW";
+            int nw = dm_text_width(snow, DM_ROW_DOT);
+            dm_text(ctx, w - DM_MARGIN_X - nw, y, snow, eta_col_w,
+                    DM_ROW_DOT, amber);
         } else {
             char seta[MAX_ETA_LEN + 2];
             dm_sanitize(dep->eta, seta, sizeof(seta) - 2);
