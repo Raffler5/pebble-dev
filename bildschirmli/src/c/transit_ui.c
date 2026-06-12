@@ -37,14 +37,16 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
     dm_sanitize(data->station, san, sizeof(san));
 
     if (time_str && time_str[0]) {
-        // Time on the right
+        // Time on the right — needs enough max_width to not truncate "HH:MM"
         char stime[8];
         dm_sanitize(time_str, stime, sizeof(stime));
         int time_w = dm_text_width(stime, DM_HEADER_DOT);
-        dm_text(ctx, w - DM_MARGIN_X - time_w, y, stime, time_w + 2,
+        dm_text(ctx, w - DM_MARGIN_X - time_w, y, stime,
+                time_w + dm_char_width(DM_HEADER_DOT),
                 DM_HEADER_DOT, amber);
-        // Station name on the left, truncated to leave room for time
-        int name_max = content_w - time_w - dm_char_width(DM_HEADER_DOT) * 2;
+        // Station name on the left, truncated to leave room for time + gap
+        int gap = dm_char_width(DM_HEADER_DOT);
+        int name_max = content_w - time_w - gap;
         dm_text(ctx, DM_MARGIN_X, y, san, name_max, DM_HEADER_DOT, amber);
     } else {
         dm_text(ctx, DM_MARGIN_X, y, san, content_w, DM_HEADER_DOT, amber);
@@ -61,9 +63,12 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
     int row_char_w = dm_char_width(DM_ROW_DOT);
     int rh = row_height();
 
-    // Column widths
-    int line_col_w = 4 * row_char_w;
-    int eta_col_w  = 5 * row_char_w;
+    // Column widths — tight allocation to maximize direction space
+    // Line: 3 chars ("S2", "520", "13" all fit)
+    // ETA: 3 chars ("6'", "21'", "99'" all fit)
+    // Direction: gets everything that's left
+    int line_col_w = 3 * row_char_w;
+    int eta_col_w  = 3 * row_char_w;
     int dir_col_w  = content_w - line_col_w - eta_col_w - 4;
 
     int visible = transit_ui_visible_rows(bounds);

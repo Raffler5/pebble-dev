@@ -78,30 +78,51 @@ static void update_time(void) {
 }
 
 // ── Station list parser ──────────────────────────────────────
-// Format: "name1:id1:dist1;name2:id2:dist2;...%"
+// Format: "city1|stop1:id1:dist1;city2|stop2:id2:dist2;...%"
 
 static void parse_stations(const char *raw) {
     if (!raw || !raw[0]) return;
 
     memset(&s_stations, 0, sizeof(s_stations));
+    s_stations.mode = STATION_DISPLAY_STOP;  // default: Mode A
     const char *p = raw;
 
     while (*p && *p != '%' && s_stations.count < MAX_STATIONS) {
         StationEntry *st = &s_stations.stations[s_stations.count];
 
-        // Name
+        // City|Stop (separated by pipe)
         const char *colon = strchr(p, ':');
         if (!colon) break;
-        size_t len = colon - p;
-        if (len >= MAX_STATION_NAME) len = MAX_STATION_NAME - 1;
-        memcpy(st->name, p, len);
-        st->name[len] = '\0';
+
+        // Find the pipe within city|stop
+        const char *pipe = p;
+        while (pipe < colon && *pipe != '|') pipe++;
+
+        if (pipe < colon && *pipe == '|') {
+            // Has city|stop split
+            size_t clen = pipe - p;
+            if (clen >= sizeof(st->city)) clen = sizeof(st->city) - 1;
+            memcpy(st->city, p, clen);
+            st->city[clen] = '\0';
+
+            size_t slen = colon - (pipe + 1);
+            if (slen >= sizeof(st->stop)) slen = sizeof(st->stop) - 1;
+            memcpy(st->stop, pipe + 1, slen);
+            st->stop[slen] = '\0';
+        } else {
+            // No pipe — whole thing is the name, put in city
+            size_t len = colon - p;
+            if (len >= sizeof(st->city)) len = sizeof(st->city) - 1;
+            memcpy(st->city, p, len);
+            st->city[len] = '\0';
+            st->stop[0] = '\0';
+        }
         p = colon + 1;
 
         // ID
         colon = strchr(p, ':');
         if (!colon) break;
-        len = colon - p;
+        size_t len = colon - p;
         if (len >= MAX_STATION_ID) len = MAX_STATION_ID - 1;
         memcpy(st->id, p, len);
         st->id[len] = '\0';
@@ -119,6 +140,17 @@ static void parse_stations(const char *raw) {
         p = semi + 1;
 
         s_stations.count++;
+    }
+
+    // Detect shared city prefix
+    s_stations.shared_city = true;
+    if (s_stations.count > 1) {
+        for (int i = 1; i < s_stations.count; i++) {
+            if (strcmp(s_stations.stations[0].city, s_stations.stations[i].city) != 0) {
+                s_stations.shared_city = false;
+                break;
+            }
+        }
     }
 
     s_stations.selected = 0;

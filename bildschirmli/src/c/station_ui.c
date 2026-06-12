@@ -3,14 +3,40 @@
 #include <stdio.h>
 #include <string.h>
 
-// Row layout for the station picker. Each row:
-//   [station name]                    [distance]
-// Selected row: amber background, black text (inverted).
-
 int station_ui_visible_rows(GRect bounds) {
     int header_h = dm_text_height(DM_HEADER_DOT) + DM_ROW_GAP + 4;
     int row_h = dm_text_height(DM_ROW_DOT) + DM_ROW_GAP + 4;
     return (bounds.size.h - DM_MARGIN_Y - header_h) / row_h;
+}
+
+// Format a station name based on display mode
+static void format_station_name(const StationListData *data, int idx,
+                                char *out, size_t out_len) {
+    const StationEntry *st = &data->stations[idx];
+
+    if (data->mode == STATION_DISPLAY_STOP || data->shared_city) {
+        // Mode A: just the stop part
+        if (st->stop[0]) {
+            snprintf(out, out_len, "%s", st->stop);
+        } else {
+            // No comma in original name — use city as fallback
+            snprintf(out, out_len, "%s", st->city);
+        }
+    } else {
+        // Mode B: "CIT STOP" — 3-char city abbreviation + stop
+        if (st->stop[0] && st->city[0]) {
+            char city_abbr[4];
+            size_t clen = strlen(st->city);
+            if (clen > 3) clen = 3;
+            memcpy(city_abbr, st->city, clen);
+            city_abbr[clen] = '\0';
+            snprintf(out, out_len, "%s %s", city_abbr, st->stop);
+        } else if (st->stop[0]) {
+            snprintf(out, out_len, "%s", st->stop);
+        } else {
+            snprintf(out, out_len, "%s", st->city);
+        }
+    }
 }
 
 void station_ui_draw(GContext *ctx, GRect bounds, const StationListData *data) {
@@ -25,7 +51,7 @@ void station_ui_draw(GContext *ctx, GRect bounds, const StationListData *data) {
     int content_w = w - 2 * DM_MARGIN_X;
     int y = DM_MARGIN_Y;
 
-    // Header: "STATIONS"
+    // Header
     dm_text(ctx, DM_MARGIN_X, y, "STATIONS", content_w, DM_HEADER_DOT, amber);
     y += dm_text_height(DM_HEADER_DOT) + DM_ROW_GAP;
 
@@ -43,8 +69,8 @@ void station_ui_draw(GContext *ctx, GRect bounds, const StationListData *data) {
     int row_h = row_text_h + DM_ROW_GAP + 4;
     int visible = station_ui_visible_rows(bounds);
 
-    // Distance column: "120M" = 4 chars max
-    int dist_col_w = 5 * dm_char_width(DM_ROW_DOT);
+    // Distance column: 3 chars ("459", "800"), no unit — always meters at <1km
+    int dist_col_w = 3 * dm_char_width(DM_ROW_DOT) + 2;
     int name_col_w = content_w - dist_col_w - 4;
 
     for (int vi = 0; vi < visible && (data->scroll_offset + vi) < data->count; vi++) {
@@ -64,29 +90,25 @@ void station_ui_draw(GContext *ctx, GRect bounds, const StationListData *data) {
 
         GColor text_color = selected ? black : amber;
 
-        // Station name
+        // Station name — formatted based on display mode
+        char display_name[MAX_STATION_NAME];
+        format_station_name(data, idx, display_name, sizeof(display_name));
         char san[MAX_STATION_NAME];
-        dm_sanitize(st->name, san, sizeof(san));
+        dm_sanitize(display_name, san, sizeof(san));
         dm_text(ctx, DM_MARGIN_X, row_y, san, name_col_w, DM_ROW_DOT, text_color);
 
-        // Distance — format as "120M" or "1.2K"
+        // Distance — plain number, no unit
         char dist[8];
-        if (st->distance_m < 1000) {
-            snprintf(dist, sizeof(dist), "%dM", st->distance_m);
-        } else {
-            snprintf(dist, sizeof(dist), "%d.%dK",
-                     st->distance_m / 1000,
-                     (st->distance_m % 1000) / 100);
-        }
+        snprintf(dist, sizeof(dist), "%d", st->distance_m);
         char sdist[8];
         dm_sanitize(dist, sdist, sizeof(sdist));
         int dw = dm_text_width(sdist, DM_ROW_DOT);
-        dm_text(ctx, w - DM_MARGIN_X - dw, row_y, sdist, dist_col_w, DM_ROW_DOT, text_color);
+        dm_text(ctx, w - DM_MARGIN_X - dw, row_y, sdist, dist_col_w,
+                DM_ROW_DOT, text_color);
     }
 
-    // Scroll indicators — small arrows if there's content above or below
+    // Scroll indicators
     if (data->scroll_offset > 0) {
-        // Up arrow: small amber triangle at top-right
         int ax = w - DM_MARGIN_X - 6;
         int ay = DM_MARGIN_Y + dm_text_height(DM_HEADER_DOT) + 2;
         graphics_context_set_fill_color(ctx, amber);
@@ -94,7 +116,6 @@ void station_ui_draw(GContext *ctx, GRect bounds, const StationListData *data) {
         graphics_fill_rect(ctx, GRect(ax + 2, ay - 1, 2, 1), 0, GCornerNone);
     }
     if (data->scroll_offset + visible < data->count) {
-        // Down arrow: small amber triangle at bottom-right
         int ax = w - DM_MARGIN_X - 6;
         int ay = bounds.size.h - DM_MARGIN_Y;
         graphics_context_set_fill_color(ctx, amber);

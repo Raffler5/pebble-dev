@@ -4,10 +4,11 @@
 //   1. GPS → find nearest stations → send station list to watch
 //   2. Watch requests departures for a specific station ID → fetch → send
 //
-// API: transport.opendata.ch (same as SmallTV-Ultra, SwissTP, Tramlin)
+// API: transport.opendata.ch
 
-var MAX_STATIONS = 10;
+var MAX_STATIONS = 6;
 var MAX_DEPARTURES = 12;
+var MAX_DISTANCE_M = 800;
 
 function xhrGet(url, callback) {
     var xhr = new XMLHttpRequest();
@@ -19,7 +20,7 @@ function xhrGet(url, callback) {
     xhr.send();
 }
 
-// Haversine distance in meters between two lat/lon points
+// Haversine distance in meters
 function haversineM(lat1, lon1, lat2, lon2) {
     var R = 6371000;
     var dLat = (lat2 - lat1) * Math.PI / 180;
@@ -30,37 +31,51 @@ function haversineM(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Direction sanitizer — matches SmallTV-Ultra logic
+// Split "City, Stop" into { city: "City", stop: "Stop" }
+// Abbreviate common words in the stop part
+function splitStationName(fullName) {
+    var comma = fullName.indexOf(', ');
+    var city, stop;
+
+    if (comma > 0) {
+        city = fullName.substring(0, comma);
+        stop = fullName.substring(comma + 2);
+    } else {
+        city = fullName;
+        stop = '';
+    }
+
+    // Abbreviate common words in stop
+    stop = stop.replace(/Bahnhof/g, 'Bhf')
+               .replace(/Strasse/g, 'Str')
+               .replace(/strasse/g, 'str');
+
+    return { city: city, stop: stop };
+}
+
+// Direction sanitizer for departure view
 function sanitizeDirection(stationFull, rawTo) {
     if (!rawTo) return '';
 
     // "X, Bahnhof" → "Bhf. X"
     var bhfIdx = rawTo.indexOf(', Bahnhof');
-    if (bhfIdx > 0) {
-        return 'Bhf. ' + rawTo.substring(0, bhfIdx);
-    }
+    if (bhfIdx > 0) return 'Bhf ' + rawTo.substring(0, bhfIdx);
 
     // "Zürich, X" → "X"
-    if (rawTo.indexOf('Zürich, ') === 0) {
-        return rawTo.substring(8);
-    }
+    if (rawTo.indexOf('Zürich, ') === 0) return rawTo.substring(8);
 
     // "<ownCity>, X" → "X"
     if (stationFull) {
         var comma = stationFull.indexOf(',');
         if (comma > 0) {
             var city = stationFull.substring(0, comma);
-            if (rawTo.indexOf(city + ', ') === 0) {
-                return rawTo.substring(city.length + 2);
-            }
+            if (rawTo.indexOf(city + ', ') === 0) return rawTo.substring(city.length + 2);
         }
     }
 
-    // Generic: strip "City, " prefix for compactness
+    // Generic "City, X" → "X"
     var c = rawTo.indexOf(', ');
-    if (c > 0 && c < 20) {
-        return rawTo.substring(c + 2);
-    }
+    if (c > 0 && c < 20) return rawTo.substring(c + 2);
 
     return rawTo;
 }
@@ -76,67 +91,77 @@ function findStations() {
             s_userLat = pos.coords.latitude;
             s_userLon = pos.coords.longitude;
 
+            // Request more than MAX_STATIONS since we'll filter by distance
             var url = 'http://transport.opendata.ch/v1/locations?x=' +
                       s_userLat + '&y=' + s_userLon +
-                      '&type=station&limit=' + MAX_STATIONS;
+                      '&type=station&limit=15';
 
             console.log('Bildschirmli: finding stations near ' +
                         s_userLat.toFixed(4) + ',' + s_userLon.toFixed(4));
 
             xhrGet(url, function(err, responseText) {
                 if (err) {
-                    Pebble.sendAppMessage({ 'KEY_ERROR': 'Station API: ' + err });
+                    Pebble.sendAppMessage({ 'KEY_ERROR': 'Station: ' + err });
                     return;
                 }
 
                 var json;
                 try { json = JSON.parse(responseText); }
                 catch(e) {
-                    Pebble.sendAppMessage({ 'KEY_ERROR': 'Station JSON error' });
+                    Pebble.sendAppMessage({ 'KEY_ERROR': 'JSON error' });
                     return;
                 }
 
                 if (!json.stations || json.stations.length === 0) {
-                    Pebble.sendAppMessage({ 'KEY_ERROR': 'No stations nearby' });
+                    Pebble.sendAppMessage({ 'KEY_ERROR': 'No stations' });
                     return;
                 }
 
-                // Build station list with distances, sorted by distance.
-                // Format: "name1:id1:dist1;name2:id2:dist2;...%"
+                // Build entries with distance, filter, sort
                 var entries = [];
                 for (var i = 0; i < json.stations.length; i++) {
                     var st = json.stations[i];
                     if (!st.id || !st.name) continue;
 
-                    var dist = 0;
+                    var dist = 9999;
                     if (st.coordinate && st.coordinate.x && st.coordinate.y) {
                         dist = Math.round(haversineM(
                             s_userLat, s_userLon,
                             st.coordinate.x, st.coordinate.y));
-                    } else if (st.distance !== undefined) {
-                        dist = Math.round(st.distance);
                     }
 
+                    if (dist > MAX_DISTANCE_M) continue;
+
+                    var parts = splitStationName(st.name);
                     entries.push({
-                        name: st.name,
+                        city: parts.city,
+                        stop: parts.stop,
                         id: st.id,
                         distance: dist
                     });
                 }
 
-                // Sort by distance ascending
                 entries.sort(function(a, b) { return a.distance - b.distance; });
 
-                var result = '';
                 var count = Math.min(entries.length, MAX_STATIONS);
+                if (count === 0) {
+                    Pebble.sendAppMessage({ 'KEY_ERROR': 'No stops <800m' });
+                    return;
+                }
+
+                // Format: "city1|stop1:id1:dist1;city2|stop2:id2:dist2;...%"
+                // Use | as city/stop separator (: is already used for fields)
+                var result = '';
                 for (var j = 0; j < count; j++) {
-                    result += entries[j].name + ':' +
+                    result += entries[j].city + '|' +
+                              entries[j].stop + ':' +
                               entries[j].id + ':' +
                               entries[j].distance + ';';
                 }
                 result += '%';
 
-                console.log('Bildschirmli: sending ' + count + ' stations');
+                console.log('Bildschirmli: sending ' + count + ' stations (' +
+                            result.length + 'B)');
 
                 Pebble.sendAppMessage({
                     'KEY_STATION': result
@@ -155,7 +180,7 @@ function findStations() {
     );
 }
 
-// ── Phase 2: Fetch departures for a station ID ───────────────
+// ── Phase 2: Fetch departures ────────────────────────────────
 
 function fetchDepartures(stationId) {
     var url = 'http://transport.opendata.ch/v1/stationboard?id=' + stationId +
@@ -177,26 +202,35 @@ function fetchDepartures(stationId) {
         var json;
         try { json = JSON.parse(responseText); }
         catch(e) {
-            Pebble.sendAppMessage({ 'KEY_ERROR': 'JSON parse error' });
+            Pebble.sendAppMessage({ 'KEY_ERROR': 'JSON error' });
             return;
         }
 
         if (!json.station || !json.stationboard) {
-            Pebble.sendAppMessage({ 'KEY_ERROR': 'Bad API response' });
+            Pebble.sendAppMessage({ 'KEY_ERROR': 'Bad response' });
             return;
         }
 
         var stationName = json.station.name || '?';
+        // Send the stop part for the header (after comma), abbreviated
+        var parts = splitStationName(stationName);
+        var headerName = parts.stop || parts.city;
+
         var now = Math.floor(Date.now() / 1000);
 
-        // Format: "StationName;line:dir:min;line:dir:min;...%"
-        var result = stationName + ';';
+        // Format: "HeaderName;line:dir:min;...%"
+        var result = headerName + ';';
         var count = Math.min(json.stationboard.length, MAX_DEPARTURES);
 
         for (var i = 0; i < count; i++) {
             var entry = json.stationboard[i];
             var line = entry.number || '?';
             var dir = sanitizeDirection(stationName, entry.to);
+
+            // Abbreviate common direction words
+            dir = dir.replace(/Bahnhof/g, 'Bhf')
+                     .replace(/Strasse/g, 'Str')
+                     .replace(/strasse/g, 'str');
 
             var depTime = 0;
             if (entry.stop) {
@@ -211,9 +245,6 @@ function fetchDepartures(stationId) {
             result += line + ':' + dir + ':' + minutes + ';';
         }
         result += '%';
-
-        console.log('Bildschirmli: sending ' + count + ' departures (' +
-                    result.length + ' bytes)');
 
         Pebble.sendAppMessage({
             'KEY_DEPARTURES': result
@@ -235,12 +266,9 @@ Pebble.addEventListener('ready', function(e) {
 Pebble.addEventListener('appmessage', function(e) {
     console.log('Bildschirmli: appmessage: ' + JSON.stringify(e.payload));
 
-    // Watch requests a departure fetch for a specific station ID
     if (e.payload.KEY_FETCH) {
         fetchDepartures('' + e.payload.KEY_FETCH);
     }
-
-    // Watch requests a station list refresh
     if (e.payload.KEY_STATION) {
         findStations();
     }
