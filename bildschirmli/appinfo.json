@@ -1,0 +1,23 @@
+{
+  "uuid": "b1ld5c41-0001-4e62-b1e0-cafe12345678",
+  "shortName": "Bildschirmli",
+  "longName": "Bildschirmli - Swiss Transit",
+  "companyName": "Raffler5",
+  "versionLabel": "0.1.0",
+  "sdkVersion": "3",
+  "targetPlatforms": ["basalt", "emery"],
+  "watchapp": {
+    "watchface": false
+  },
+  "enableMultiJS": true,
+  "capabilities": ["location"],
+  "appKeys": {
+    "KEY_STATION": 0,
+    "KEY_DEPARTURES": 1,
+    "KEY_ERROR": 2,
+    "KEY_FETCH": 3
+  },
+  "resources": {
+    "media": []
+  }
+}
