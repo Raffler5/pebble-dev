@@ -105,45 +105,59 @@ function openConfigPage() {
 
         '<script>' +
         'var favs=' + favsJSON + ';' +
+        // Store search results so we can reference by index (avoids escaping issues)
+        'var searchResults=[];' +
 
         'function renderFavs(){' +
         'var el=document.getElementById("favs");' +
-        'if(!favs.length){el.innerHTML="<div class=\\"empty\\">No favorites yet — search and add below</div>";return;}' +
+        'if(!favs.length){el.innerHTML="<div class=\\"empty\\">No favorites yet</div>";return;}' +
         'var h="";' +
         'for(var i=0;i<favs.length;i++){' +
-        'h+="<div class=\\"fav\\"><span class=\\"name\\">"+favs[i].name+"</span>";' +
-        'if(favs[i].id)h+="<span class=\\"id\\">"+favs[i].id+"</span>";' +
+        'h+="<div class=\\"fav\\"><span class=\\"name\\">"+esc(favs[i].name)+"</span>";' +
         'h+="<button class=\\"rm\\" onclick=\\"rmFav("+i+")\\">&times;</button></div>";}' +
         'el.innerHTML=h;}' +
 
+        'function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}' +
+
         'function rmFav(i){favs.splice(i,1);renderFavs();}' +
 
-        'function addFav(name,id){' +
-        'for(var i=0;i<favs.length;i++){if(favs[i].id===id)return;}' +
-        'favs.push({name:name,id:id});renderFavs();' +
+        // Add by index into searchResults — avoids all escaping issues
+        'function addFav(idx){' +
+        'var s=searchResults[idx];if(!s)return;' +
+        'for(var i=0;i<favs.length;i++){if(favs[i].id===s.id)return;}' +
+        'favs.push({name:s.name,id:s.id});renderFavs();' +
         'document.getElementById("results").innerHTML="<div class=\\"empty\\">Added!</div>";}' +
 
         'function search(){' +
         'var q=document.getElementById("q").value.trim();' +
-        'if(!q){return;}' +
+        'if(q.length<2){document.getElementById("results").innerHTML=' +
+        '"<div class=\\"empty\\">Enter at least 2 characters</div>";return;}' +
+        'var btn=document.querySelector(".search-btn");' +
+        'btn.disabled=true;btn.textContent="...";' +
         'document.getElementById("results").innerHTML="<div class=\\"searching\\">Searching...</div>";' +
         'var xhr=new XMLHttpRequest();' +
         'xhr.timeout=10000;' +
         'xhr.onload=function(){' +
+        'btn.disabled=false;btn.textContent="Find";' +
         'try{var j=JSON.parse(this.responseText);' +
+        'searchResults=[];' +
         'var h="";' +
         'if(!j.stations||!j.stations.length){h="<div class=\\"empty\\">No stations found</div>";}' +
-        'else{for(var i=0;i<Math.min(j.stations.length,8);i++){' +
+        'else{for(var i=0;i<j.stations.length;i++){' +
         'var s=j.stations[i];if(!s.id||!s.name)continue;' +
-        'h+="<div class=\\"result\\" onclick=\\"addFav(\'"+s.name.replace(/\'/g,"\\\\\\'")+"\',\'"+s.id+"\')\\">"+' +
-        '"<span class=\\"name\\">"+s.name+"</span><span class=\\"add\\">+</span></div>";}}' +
+        'searchResults.push({name:s.name,id:s.id});' +
+        'var label=esc(s.name);' +
+        // Show coordinates to disambiguate same-name stops (SmallTV-Ultra pattern)
+        'if(s.coordinate&&s.coordinate.x)label+=" <span class=\\"id\\">("+s.coordinate.x.toFixed(3)+", "+s.coordinate.y.toFixed(3)+")</span>";' +
+        'h+="<div class=\\"result\\" onclick=\\"addFav("+(searchResults.length-1)+")\\">"+' +
+        '"<span class=\\"name\\">"+label+"</span><span class=\\"add\\">+</span></div>";}}' +
         'document.getElementById("results").innerHTML=h;' +
-        '}catch(e){document.getElementById("results").innerHTML="<div class=\\"empty\\">Error parsing results</div>";}};' +
-        'xhr.onerror=function(){document.getElementById("results").innerHTML="<div class=\\"empty\\">Network error</div>";};' +
-        'xhr.open("GET","https://transport.opendata.ch/v1/locations?query="+encodeURIComponent(q)+"&type=station&limit=8");' +
+        '}catch(e){document.getElementById("results").innerHTML="<div class=\\"empty\\">Error</div>";}};' +
+        'xhr.onerror=function(){btn.disabled=false;btn.textContent="Find";' +
+        'document.getElementById("results").innerHTML="<div class=\\"empty\\">Network error</div>";};' +
+        'xhr.open("GET","https://transport.opendata.ch/v1/locations?query="+encodeURIComponent(q)+"&type=station");' +
         'xhr.send();}' +
 
-        // Enter key triggers search
         'document.getElementById("q").addEventListener("keyup",function(e){if(e.keyCode===13)search();});' +
 
         'function submit(){' +
