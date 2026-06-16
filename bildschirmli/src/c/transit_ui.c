@@ -80,11 +80,10 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
 
         // ETA — bus icon for 0 min, otherwise right-aligned "N'"
         if (strcmp(dep->eta, "0") == 0) {
-            // 8x11 bus icon at pitch 1 = 8px wide, 11px tall
-            int icon_x = w - DM_MARGIN_X - 8;
-            // Center vertically in the text row
-            int icon_y = y + (dm_text_height(DM_ROW_DOT) - 11) / 2;
-            dm_bus_icon(ctx, icon_x, icon_y, DM_ROW_DOT, amber);
+            // 8x9 bus icon at text pitch
+            int pitch = DM_ROW_DOT + 1;
+            int icon_w = 8 * pitch;
+            dm_bus_icon(ctx, w - DM_MARGIN_X - icon_w, y, DM_ROW_DOT, amber);
         } else {
             char seta[MAX_ETA_LEN + 2];
             dm_sanitize(dep->eta, seta, sizeof(seta) - 2);

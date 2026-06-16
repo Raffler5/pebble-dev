@@ -49,10 +49,21 @@ const uint8_t DM_FONT_5X7[128][7] = {
     ['Z'] = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F},
 };
 
-// 8x11 bus icon — original from SmallTV-Ultra / ESP32-S3.
-// 8 columns wide, MSB-first.
-const uint8_t DM_BUS_ICON[11] = {
-    0x7E, 0xC3, 0xFF, 0x81, 0x81, 0x81, 0x81, 0xFF, 0xBD, 0xFF, 0x42,
+// 8x9 bus icon — scaled from the 8x11 original (2 body rows removed).
+// Preserves roof, windows, divider, body (2 rows), floor, wheel wells,
+// undercarriage, wheels. Drawn at text pitch.
+//
+//   .██████.  0x7E  roof
+//   ██....██  0xC3  windows
+//   ████████  0xFF  divider
+//   █......█  0x81  body
+//   █......█  0x81  body
+//   ████████  0xFF  floor
+//   █.████.█  0xBD  wheel wells
+//   ████████  0xFF  undercarriage
+//   .█....█.  0x42  wheels
+const uint8_t DM_BUS_ICON[9] = {
+    0x7E, 0xC3, 0xFF, 0x81, 0x81, 0xFF, 0xBD, 0xFF, 0x42,
 };
 
 int dm_char_width(uint8_t dot_size) {
@@ -128,18 +139,17 @@ int dm_text(GContext *ctx, int x, int y, const char *text, int max_width,
 }
 
 void dm_bus_icon(GContext *ctx, int x, int y, uint8_t dot_size, GColor color) {
-    // Draw at pitch 1 (1px per dot, no gap) regardless of dot_size.
-    // This keeps the 8x11 icon compact enough to fit within text row height.
-    // At pitch 1: 8px wide × 11px tall — fits in ~14px row height.
-    (void)dot_size;  // not used — always pitch 1
+    // Draw at text pitch (dot_size + 1) — same scale as characters.
+    // 8 cols × 9 rows at pitch 2 = 16×18px on basalt, fits in 19px row.
+    int pitch = dot_size + 1;
     graphics_context_set_fill_color(ctx, color);
 
-    for (int row = 0; row < 11; row++) {
+    for (int row = 0; row < 9; row++) {
         uint8_t bits = DM_BUS_ICON[row];
         for (int col = 0; col < 8; col++) {
             if (bits & (0x80 >> col)) {
                 graphics_fill_rect(ctx,
-                    GRect(x + col, y + row, 1, 1),
+                    GRect(x + col * pitch, y + row * pitch, dot_size, dot_size),
                     0, GCornerNone);
             }
         }
