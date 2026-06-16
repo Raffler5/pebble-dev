@@ -1,11 +1,13 @@
 /**
  * Bildschirmli — Swiss transit departure board for Pebble.
  *
- * Follows the official SDK pattern from pebble-sdk-examples:
- *   - ALL windows created at init, destroyed at deinit
- *   - Layers created in .load, destroyed in .unload
- *   - .appear used for state refresh (not just mark_dirty)
+ * Architecture (from official SDK patterns):
+ *   - Both windows created at init(), destroyed at deinit()
+ *   - update_proc set directly on root layer (feature_frame_buffer pattern)
+ *     → no layer_create/destroy, no lifecycle bugs
+ *   - .appear on picker resets state (pebble_arcade pattern)
  *   - Back button: SDK default (no subscription = pop)
+ *   - All app state in file-scope statics (the Pebble way)
  *
  * Platforms: basalt (Pebble Time 144x168), emery (PT2 200x228).
  */
@@ -23,7 +25,7 @@
 
 #define REFRESH_INTERVAL_S 60
 
-// ── App state (file-scope statics, the Pebble way) ──────────
+// ── App state ────────────────────────────────────────────────
 
 typedef enum {
     STATUS_CONNECTING,
@@ -41,14 +43,11 @@ static StationListData s_stations;
 static TransitData s_transit;
 static char s_time_buf[8];
 
-// Both windows created at init, destroyed at deinit
+// Windows — created at init, destroyed at deinit
 static Window *s_picker_window;
 static Window *s_deps_window;
 
-// Layers created in .load, destroyed in .unload
-static Layer *s_picker_layer;
-static Layer *s_deps_layer;
-
+// No child layers — update_proc set on root layer directly
 static AppTimer *s_refresh_timer;
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -69,6 +68,19 @@ static void update_time(void) {
     struct tm *t = localtime(&now);
     strftime(s_time_buf, sizeof(s_time_buf),
              clock_is_24h_style() ? "%H:%M" : "%I:%M", t);
+}
+
+// Mark the appropriate window dirty based on which is on top
+static void mark_picker_dirty(void) {
+    if (s_picker_window) {
+        layer_mark_dirty(window_get_root_layer(s_picker_window));
+    }
+}
+
+static void mark_deps_dirty(void) {
+    if (s_deps_window) {
+        layer_mark_dirty(window_get_root_layer(s_deps_window));
+    }
 }
 
 // ── Parsers ──────────────────────────────────────────────────
@@ -192,7 +204,7 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
     if (t) {
         parse_stations(t->value->cstring);
         s_status = STATUS_STATIONS_READY;
-        if (s_picker_layer) layer_mark_dirty(s_picker_layer);
+        mark_picker_dirty();
         return;
     }
 
@@ -201,7 +213,7 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
         parse_departures(t->value->cstring);
         update_time();
         s_status = STATUS_DEPS_READY;
-        if (s_deps_layer) layer_mark_dirty(s_deps_layer);
+        mark_deps_dirty();
         return;
     }
 
@@ -209,8 +221,8 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
     if (t) {
         snprintf(s_error_msg, sizeof(s_error_msg), "%s", t->value->cstring);
         s_status = STATUS_ERROR;
-        if (s_deps_layer) layer_mark_dirty(s_deps_layer);
-        if (s_picker_layer) layer_mark_dirty(s_picker_layer);
+        mark_deps_dirty();
+        mark_picker_dirty();
     }
 }
 
@@ -237,7 +249,7 @@ static void deps_update_proc(Layer *layer, GContext *ctx) {
 static void deps_select_handler(ClickRecognizerRef ref, void *ctx) {
     if (s_stations.valid && s_stations.selected < s_stations.count) {
         s_status = STATUS_LOADING_DEPS;
-        if (s_deps_layer) layer_mark_dirty(s_deps_layer);
+        mark_deps_dirty();
         request_departures(s_stations.stations[s_stations.selected].id);
     }
 }
@@ -245,7 +257,7 @@ static void deps_select_handler(ClickRecognizerRef ref, void *ctx) {
 static void deps_up_handler(ClickRecognizerRef ref, void *ctx) {
     if (s_transit.scroll_offset > 0) {
         s_transit.scroll_offset--;
-        if (s_deps_layer) layer_mark_dirty(s_deps_layer);
+        mark_deps_dirty();
     }
 }
 
@@ -254,7 +266,7 @@ static void deps_down_handler(ClickRecognizerRef ref, void *ctx) {
     int visible = transit_ui_visible_rows(bounds);
     if (s_transit.scroll_offset + visible < s_transit.count) {
         s_transit.scroll_offset++;
-        if (s_deps_layer) layer_mark_dirty(s_deps_layer);
+        mark_deps_dirty();
     }
 }
 
@@ -274,15 +286,13 @@ static void deps_click_config(void *context) {
     window_single_click_subscribe(BUTTON_ID_SELECT, deps_select_handler);
     window_single_click_subscribe(BUTTON_ID_UP, deps_up_handler);
     window_single_click_subscribe(BUTTON_ID_DOWN, deps_down_handler);
-    // BACK not subscribed → SDK default pops window
+    // BACK: not subscribed → SDK default pops window
 }
 
 static void deps_window_load(Window *window) {
+    // Set update_proc directly on root layer — no child layer needed
     Layer *root = window_get_root_layer(window);
-    GRect bounds = layer_get_bounds(root);
-    s_deps_layer = layer_create(bounds);
-    layer_set_update_proc(s_deps_layer, deps_update_proc);
-    layer_add_child(root, s_deps_layer);
+    layer_set_update_proc(root, deps_update_proc);
 
     accel_tap_service_subscribe(deps_tap_handler);
     s_refresh_timer = app_timer_register(REFRESH_INTERVAL_S * 1000,
@@ -295,16 +305,14 @@ static void deps_window_unload(Window *window) {
         app_timer_cancel(s_refresh_timer);
         s_refresh_timer = NULL;
     }
-    layer_destroy(s_deps_layer);
-    s_deps_layer = NULL;
-    // Window is NOT destroyed here — destroyed in deinit()
+    // No layer to destroy — root layer is managed by the window
 }
 
 // ── Station picker screen ────────────────────────────────────
 
 static void picker_update_proc(Layer *layer, GContext *ctx) {
     GRect bounds = layer_get_bounds(layer);
-    if (s_status == STATUS_STATIONS_READY && s_stations.valid) {
+    if (s_stations.valid) {
         station_ui_draw(ctx, bounds, &s_stations);
     } else {
         transit_ui_draw_status(ctx, bounds, status_message());
@@ -323,7 +331,7 @@ static void picker_up_handler(ClickRecognizerRef ref, void *ctx) {
     s_stations.selected--;
     if (s_stations.selected < s_stations.scroll_offset)
         s_stations.scroll_offset = s_stations.selected;
-    layer_mark_dirty(s_picker_layer);
+    mark_picker_dirty();
 }
 
 static void picker_down_handler(ClickRecognizerRef ref, void *ctx) {
@@ -333,42 +341,40 @@ static void picker_down_handler(ClickRecognizerRef ref, void *ctx) {
     int visible = station_ui_visible_rows(bounds);
     if (s_stations.selected >= s_stations.scroll_offset + visible)
         s_stations.scroll_offset = s_stations.selected - visible + 1;
-    layer_mark_dirty(s_picker_layer);
+    mark_picker_dirty();
 }
 
 static void picker_click_config(void *context) {
     window_single_click_subscribe(BUTTON_ID_SELECT, picker_select_handler);
     window_single_click_subscribe(BUTTON_ID_UP, picker_up_handler);
     window_single_click_subscribe(BUTTON_ID_DOWN, picker_down_handler);
-    // BACK not subscribed → SDK default exits app
+    // BACK: not subscribed → SDK default exits app
 }
 
 static void picker_window_load(Window *window) {
+    // Set update_proc directly on root layer
     Layer *root = window_get_root_layer(window);
-    GRect bounds = layer_get_bounds(root);
-    s_picker_layer = layer_create(bounds);
-    layer_set_update_proc(s_picker_layer, picker_update_proc);
-    layer_add_child(root, s_picker_layer);
+    layer_set_update_proc(root, picker_update_proc);
 }
 
-// .appear — fires every time picker becomes visible (including after back)
-// Following pebble_arcade pattern: reset relevant state, then data is ready
-// for the next update_proc call which the SDK triggers after .appear
 static void picker_window_appear(Window *window) {
-    s_status = STATUS_STATIONS_READY;
-    if (s_picker_layer) layer_mark_dirty(s_picker_layer);
+    // Reset to station-ready state when returning from deps screen
+    // (pebble_arcade pattern: reset state in .appear)
+    if (s_stations.valid) {
+        s_status = STATUS_STATIONS_READY;
+    }
+    mark_picker_dirty();
 }
 
 static void picker_window_unload(Window *window) {
-    layer_destroy(s_picker_layer);
-    s_picker_layer = NULL;
+    // No layer to destroy — root layer is managed by the window
 }
 
 // ── Tick handler ─────────────────────────────────────────────
 
 static void tick_handler(struct tm *tick_time, TimeUnits changed) {
     update_time();
-    if (s_deps_layer) layer_mark_dirty(s_deps_layer);
+    mark_deps_dirty();
 }
 
 // ── App lifecycle ────────────────────────────────────────────
@@ -379,7 +385,7 @@ static void init(void) {
     s_status = STATUS_CONNECTING;
     update_time();
 
-    // Create BOTH windows at init (official SDK pattern)
+    // Create BOTH windows at init
     s_picker_window = window_create();
     window_set_background_color(s_picker_window, GColorBlack);
     window_set_click_config_provider(s_picker_window, picker_click_config);
@@ -397,7 +403,7 @@ static void init(void) {
         .unload = deps_window_unload,
     });
 
-    // Only push the picker (root window)
+    // Push only the picker (root)
     window_stack_push(s_picker_window, true);
 
     // AppMessage
@@ -411,7 +417,6 @@ static void init(void) {
 
 static void deinit(void) {
     tick_timer_service_unsubscribe();
-    // Destroy BOTH windows at deinit (official SDK pattern)
     window_destroy(s_deps_window);
     window_destroy(s_picker_window);
 }

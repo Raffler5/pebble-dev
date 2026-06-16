@@ -32,8 +32,8 @@ int dm_char_width(uint8_t dot_size);
 int dm_text_width(const char *text, uint8_t dot_size);
 int dm_text_height(uint8_t dot_size);
 
-// Drawing
-int dm_char(GContext *ctx, int x, int y, char c, uint8_t dot_size, GColor color);
+// Drawing — dm_text sets fill color; dm_char expects caller to set it
+int dm_char(GContext *ctx, int x, int y, char c, uint8_t dot_size);
 int dm_text(GContext *ctx, int x, int y, const char *text, int max_width, uint8_t dot_size, GColor color);
 void dm_bus_icon(GContext *ctx, int x, int y, uint8_t dot_size, GColor color);
 

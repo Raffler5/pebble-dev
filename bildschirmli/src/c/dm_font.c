@@ -78,7 +78,7 @@ int dm_text_height(uint8_t dot_size) {
     return 7 * pitch;
 }
 
-int dm_char(GContext *ctx, int x, int y, char c, uint8_t dot_size, GColor color) {
+int dm_char(GContext *ctx, int x, int y, char c, uint8_t dot_size) {
     int idx = (unsigned char)c;
     if (idx >= 128) idx = ' ';
     const uint8_t *glyph = DM_FONT_5X7[idx];
@@ -91,7 +91,7 @@ int dm_char(GContext *ctx, int x, int y, char c, uint8_t dot_size, GColor color)
     if (empty && c != ' ') glyph = DM_FONT_5X7[' '];
 
     int pitch = dot_size + 1;
-    graphics_context_set_fill_color(ctx, color);
+    // Caller must set fill color before calling dm_char/dm_text
 
     for (int row = 0; row < 7; row++) {
         uint8_t bits = glyph[row];
@@ -111,34 +111,24 @@ int dm_text(GContext *ctx, int x, int y, const char *text, int max_width,
     int cx = x;
     int len = strlen(text);
     int char_w = dm_char_width(dot_size);
-    int end_x = x + max_width;
 
-    // Check if full text fits — if so, just draw it all, no truncation
-    int total_w = dm_text_width(text, dot_size);
-    if (total_w <= max_width) {
-        for (int i = 0; i < len; i++) {
-            cx += dm_char(ctx, cx, y, text[i], dot_size, color);
-        }
-        return cx - x;
-    }
+    // Set color once for all characters
+    graphics_context_set_fill_color(ctx, color);
 
-    // Text won't fit — draw what we can, replace last drawn char with '.'
-    int last_drawn = -1;
-    for (int i = 0; i < len; i++) {
-        if (cx + char_w > end_x) {
-            // No room for this char — overwrite previous char with '.'
-            if (last_drawn >= 0) {
-                int dot_x = cx - char_w;
-                // Clear the last char area and draw dot
-                graphics_context_set_fill_color(ctx, GColorBlack);
-                graphics_fill_rect(ctx, GRect(dot_x, y, char_w,
-                                   dm_text_height(dot_size)), 0, GCornerNone);
-                dm_char(ctx, dot_x, y, '.', dot_size, color);
-            }
-            break;
+    // How many chars fit?
+    int max_chars = max_width / char_w;
+    if (max_chars <= 0) return 0;
+
+    bool truncated = (len > max_chars);
+    int draw_count = truncated ? max_chars : len;
+
+    for (int i = 0; i < draw_count; i++) {
+        // Last position gets '.' if truncated
+        if (truncated && i == draw_count - 1) {
+            dm_char(ctx, cx, y, '.', dot_size);
+        } else {
+            dm_char(ctx, cx, y, text[i], dot_size);
         }
-        dm_char(ctx, cx, y, text[i], dot_size, color);
-        last_drawn = i;
         cx += char_w;
     }
     return cx - x;
@@ -146,7 +136,7 @@ int dm_text(GContext *ctx, int x, int y, const char *text, int max_width,
 
 void dm_bus_icon(GContext *ctx, int x, int y, uint8_t dot_size, GColor color) {
     int pitch = dot_size + 1;
-    graphics_context_set_fill_color(ctx, color);
+    graphics_context_set_fill_color(ctx, color);  // icon sets its own color
 
     for (int row = 0; row < 7; row++) {
         uint8_t bits = DM_BUS_ICON[row];
