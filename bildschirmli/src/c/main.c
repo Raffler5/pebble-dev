@@ -1,10 +1,11 @@
 /**
  * Bildschirmli — Swiss transit departure board for Pebble.
  *
- * Two-screen flow:
- *   Screen 1 (Station Picker): persistent, root window.
- *   Screen 2 (Departure Board): created fresh on each station select,
- *       destroyed on back. Follows the SwissTP pattern for clean push/pop.
+ * Follows the official SDK pattern from pebble-sdk-examples:
+ *   - ALL windows created at init, destroyed at deinit
+ *   - Layers created in .load, destroyed in .unload
+ *   - .appear used for state refresh (not just mark_dirty)
+ *   - Back button: SDK default (no subscription = pop)
  *
  * Platforms: basalt (Pebble Time 144x168), emery (PT2 200x228).
  */
@@ -22,7 +23,7 @@
 
 #define REFRESH_INTERVAL_S 60
 
-// ── App state ────────────────────────────────────────────────
+// ── App state (file-scope statics, the Pebble way) ──────────
 
 typedef enum {
     STATUS_CONNECTING,
@@ -36,24 +37,21 @@ typedef enum {
 
 static AppStatus s_status = STATUS_CONNECTING;
 static char s_error_msg[32];
-
-// Station picker data
 static StationListData s_stations;
-
-// Departure board data
 static TransitData s_transit;
 static char s_time_buf[8];
 
-// Picker window — persistent (root)
+// Both windows created at init, destroyed at deinit
 static Window *s_picker_window;
-static Layer  *s_picker_layer;
-
-// Departure window — created/destroyed on each push/pop
 static Window *s_deps_window;
-static Layer  *s_deps_layer;
+
+// Layers created in .load, destroyed in .unload
+static Layer *s_picker_layer;
+static Layer *s_deps_layer;
+
 static AppTimer *s_refresh_timer;
 
-// ── Status message for current state ─────────────────────────
+// ── Helpers ──────────────────────────────────────────────────
 
 static const char* status_message(void) {
     switch (s_status) {
@@ -66,8 +64,6 @@ static const char* status_message(void) {
     }
 }
 
-// ── Time helper ──────────────────────────────────────────────
-
 static void update_time(void) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
@@ -75,12 +71,10 @@ static void update_time(void) {
              clock_is_24h_style() ? "%H:%M" : "%I:%M", t);
 }
 
-// ── Station list parser ──────────────────────────────────────
-// Format: "city1|stop1:id1:dist1;city2|stop2:id2:dist2;...%"
+// ── Parsers ──────────────────────────────────────────────────
 
 static void parse_stations(const char *raw) {
     if (!raw || !raw[0]) return;
-
     memset(&s_stations, 0, sizeof(s_stations));
     s_stations.mode = STATION_DISPLAY_STOP;
     const char *p = raw;
@@ -90,25 +84,20 @@ static void parse_stations(const char *raw) {
 
         const char *colon = strchr(p, ':');
         if (!colon) break;
-
         const char *pipe = p;
         while (pipe < colon && *pipe != '|') pipe++;
 
         if (pipe < colon && *pipe == '|') {
             size_t clen = pipe - p;
             if (clen >= sizeof(st->city)) clen = sizeof(st->city) - 1;
-            memcpy(st->city, p, clen);
-            st->city[clen] = '\0';
-
+            memcpy(st->city, p, clen); st->city[clen] = '\0';
             size_t slen = colon - (pipe + 1);
             if (slen >= sizeof(st->stop)) slen = sizeof(st->stop) - 1;
-            memcpy(st->stop, pipe + 1, slen);
-            st->stop[slen] = '\0';
+            memcpy(st->stop, pipe + 1, slen); st->stop[slen] = '\0';
         } else {
             size_t len = colon - p;
             if (len >= sizeof(st->city)) len = sizeof(st->city) - 1;
-            memcpy(st->city, p, len);
-            st->city[len] = '\0';
+            memcpy(st->city, p, len); st->city[len] = '\0';
             st->stop[0] = '\0';
         }
         p = colon + 1;
@@ -117,8 +106,7 @@ static void parse_stations(const char *raw) {
         if (!colon) break;
         size_t len = colon - p;
         if (len >= MAX_STATION_ID) len = MAX_STATION_ID - 1;
-        memcpy(st->id, p, len);
-        st->id[len] = '\0';
+        memcpy(st->id, p, len); st->id[len] = '\0';
         p = colon + 1;
 
         const char *semi = strchr(p, ';');
@@ -126,8 +114,7 @@ static void parse_stations(const char *raw) {
         char dbuf[8];
         len = semi - p;
         if (len >= sizeof(dbuf)) len = sizeof(dbuf) - 1;
-        memcpy(dbuf, p, len);
-        dbuf[len] = '\0';
+        memcpy(dbuf, p, len); dbuf[len] = '\0';
         st->distance_m = atoi(dbuf);
         p = semi + 1;
 
@@ -135,26 +122,18 @@ static void parse_stations(const char *raw) {
     }
 
     s_stations.shared_city = true;
-    if (s_stations.count > 1) {
-        for (int i = 1; i < s_stations.count; i++) {
-            if (strcmp(s_stations.stations[0].city, s_stations.stations[i].city) != 0) {
-                s_stations.shared_city = false;
-                break;
-            }
+    for (int i = 1; i < s_stations.count; i++) {
+        if (strcmp(s_stations.stations[0].city, s_stations.stations[i].city) != 0) {
+            s_stations.shared_city = false; break;
         }
     }
-
     s_stations.selected = 0;
     s_stations.scroll_offset = 0;
     s_stations.valid = (s_stations.count > 0);
 }
 
-// ── Departure string parser ──────────────────────────────────
-// Format: "StationName;line:dir:min;line:dir:min;...%"
-
 static void parse_departures(const char *raw) {
     if (!raw || !raw[0]) return;
-
     memset(&s_transit, 0, sizeof(s_transit));
     const char *p = raw;
 
@@ -162,45 +141,39 @@ static void parse_departures(const char *raw) {
     if (!semi) return;
     size_t slen = semi - p;
     if (slen >= MAX_STATION_LEN) slen = MAX_STATION_LEN - 1;
-    memcpy(s_transit.station, p, slen);
-    s_transit.station[slen] = '\0';
+    memcpy(s_transit.station, p, slen); s_transit.station[slen] = '\0';
     p = semi + 1;
 
     while (*p && *p != '%' && s_transit.count < MAX_DEPARTURES) {
         Departure *dep = &s_transit.departures[s_transit.count];
-
         const char *colon = strchr(p, ':');
         if (!colon) break;
         size_t len = colon - p;
         if (len >= MAX_LINE_LEN) len = MAX_LINE_LEN - 1;
-        memcpy(dep->line, p, len);
-        dep->line[len] = '\0';
+        memcpy(dep->line, p, len); dep->line[len] = '\0';
         p = colon + 1;
 
         colon = strchr(p, ':');
         if (!colon) break;
         len = colon - p;
         if (len >= MAX_DIR_LEN) len = MAX_DIR_LEN - 1;
-        memcpy(dep->direction, p, len);
-        dep->direction[len] = '\0';
+        memcpy(dep->direction, p, len); dep->direction[len] = '\0';
         p = colon + 1;
 
         semi = strchr(p, ';');
         if (!semi) break;
         len = semi - p;
         if (len >= MAX_ETA_LEN) len = MAX_ETA_LEN - 1;
-        memcpy(dep->eta, p, len);
-        dep->eta[len] = '\0';
+        memcpy(dep->eta, p, len); dep->eta[len] = '\0';
         p = semi + 1;
 
         s_transit.count++;
     }
-
     s_transit.scroll_offset = 0;
     s_transit.valid = (s_transit.count > 0);
 }
 
-// ── Send messages to phone ───────────────────────────────────
+// ── Phone communication ──────────────────────────────────────
 
 static void request_departures(const char *station_id) {
     DictionaryIterator *out;
@@ -210,32 +183,31 @@ static void request_departures(const char *station_id) {
     app_message_outbox_send();
 }
 
-// ── Forward declarations ─────────────────────────────────────
-static void deps_window_push(void);
-
 // ── AppMessage handlers ──────────────────────────────────────
 
 static void inbox_received_handler(DictionaryIterator *iter, void *context) {
-    Tuple *station_tuple = dict_find(iter, KEY_STATION);
-    if (station_tuple) {
-        parse_stations(station_tuple->value->cstring);
+    Tuple *t;
+
+    t = dict_find(iter, KEY_STATION);
+    if (t) {
+        parse_stations(t->value->cstring);
         s_status = STATUS_STATIONS_READY;
         if (s_picker_layer) layer_mark_dirty(s_picker_layer);
         return;
     }
 
-    Tuple *dep_tuple = dict_find(iter, KEY_DEPARTURES);
-    if (dep_tuple) {
-        parse_departures(dep_tuple->value->cstring);
+    t = dict_find(iter, KEY_DEPARTURES);
+    if (t) {
+        parse_departures(t->value->cstring);
         update_time();
         s_status = STATUS_DEPS_READY;
         if (s_deps_layer) layer_mark_dirty(s_deps_layer);
         return;
     }
 
-    Tuple *err_tuple = dict_find(iter, KEY_ERROR);
-    if (err_tuple) {
-        snprintf(s_error_msg, sizeof(s_error_msg), "%s", err_tuple->value->cstring);
+    t = dict_find(iter, KEY_ERROR);
+    if (t) {
+        snprintf(s_error_msg, sizeof(s_error_msg), "%s", t->value->cstring);
         s_status = STATUS_ERROR;
         if (s_deps_layer) layer_mark_dirty(s_deps_layer);
         if (s_picker_layer) layer_mark_dirty(s_picker_layer);
@@ -251,11 +223,10 @@ static void outbox_failed_handler(DictionaryIterator *iter,
     APP_LOG(APP_LOG_LEVEL_ERROR, "Outbox failed: %d", (int)reason);
 }
 
-// ── Departure screen (created fresh each time) ───────────────
+// ── Departure screen ─────────────────────────────────────────
 
 static void deps_update_proc(Layer *layer, GContext *ctx) {
     GRect bounds = layer_get_bounds(layer);
-
     if (s_status == STATUS_DEPS_READY && s_transit.valid) {
         transit_ui_draw(ctx, bounds, &s_transit, s_time_buf);
     } else {
@@ -279,7 +250,6 @@ static void deps_up_handler(ClickRecognizerRef ref, void *ctx) {
 }
 
 static void deps_down_handler(ClickRecognizerRef ref, void *ctx) {
-    if (!s_deps_window) return;
     GRect bounds = layer_get_bounds(window_get_root_layer(s_deps_window));
     int visible = transit_ui_visible_rows(bounds);
     if (s_transit.scroll_offset + visible < s_transit.count) {
@@ -304,13 +274,12 @@ static void deps_click_config(void *context) {
     window_single_click_subscribe(BUTTON_ID_SELECT, deps_select_handler);
     window_single_click_subscribe(BUTTON_ID_UP, deps_up_handler);
     window_single_click_subscribe(BUTTON_ID_DOWN, deps_down_handler);
-    // BACK not subscribed — SDK default pops this window
+    // BACK not subscribed → SDK default pops window
 }
 
 static void deps_window_load(Window *window) {
     Layer *root = window_get_root_layer(window);
     GRect bounds = layer_get_bounds(root);
-
     s_deps_layer = layer_create(bounds);
     layer_set_update_proc(s_deps_layer, deps_update_proc);
     layer_add_child(root, s_deps_layer);
@@ -328,41 +297,13 @@ static void deps_window_unload(Window *window) {
     }
     layer_destroy(s_deps_layer);
     s_deps_layer = NULL;
-
-    // Destroy the window itself (SwissTP pattern)
-    window_destroy(window);
-    s_deps_window = NULL;
-
-    // Force picker to redraw now that it's the top window again
-    if (s_picker_layer) {
-        layer_mark_dirty(s_picker_layer);
-    }
+    // Window is NOT destroyed here — destroyed in deinit()
 }
 
-// Create and push a fresh departure window
-static void deps_window_push(void) {
-    s_deps_window = window_create();
-    window_set_background_color(s_deps_window, GColorBlack);
-    window_set_click_config_provider(s_deps_window, deps_click_config);
-    window_set_window_handlers(s_deps_window, (WindowHandlers) {
-        .load = deps_window_load,
-        .unload = deps_window_unload,
-    });
-    window_stack_push(s_deps_window, true);
-}
-
-// ── Tick handler ─────────────────────────────────────────────
-
-static void tick_handler(struct tm *tick_time, TimeUnits changed) {
-    update_time();
-    if (s_deps_layer) layer_mark_dirty(s_deps_layer);
-}
-
-// ── Station picker screen (persistent) ───────────────────────
+// ── Station picker screen ────────────────────────────────────
 
 static void picker_update_proc(Layer *layer, GContext *ctx) {
     GRect bounds = layer_get_bounds(layer);
-
     if (s_status == STATUS_STATIONS_READY && s_stations.valid) {
         station_ui_draw(ctx, bounds, &s_stations);
     } else {
@@ -372,22 +313,16 @@ static void picker_update_proc(Layer *layer, GContext *ctx) {
 
 static void picker_select_handler(ClickRecognizerRef ref, void *ctx) {
     if (!s_stations.valid || s_stations.count == 0) return;
-
-    const char *id = s_stations.stations[s_stations.selected].id;
     s_status = STATUS_LOADING_DEPS;
-
-    // Create and push a fresh departure window
-    deps_window_push();
-
-    request_departures(id);
+    window_stack_push(s_deps_window, true);
+    request_departures(s_stations.stations[s_stations.selected].id);
 }
 
 static void picker_up_handler(ClickRecognizerRef ref, void *ctx) {
     if (!s_stations.valid || s_stations.selected <= 0) return;
     s_stations.selected--;
-    if (s_stations.selected < s_stations.scroll_offset) {
+    if (s_stations.selected < s_stations.scroll_offset)
         s_stations.scroll_offset = s_stations.selected;
-    }
     layer_mark_dirty(s_picker_layer);
 }
 
@@ -396,9 +331,8 @@ static void picker_down_handler(ClickRecognizerRef ref, void *ctx) {
     s_stations.selected++;
     GRect bounds = layer_get_bounds(window_get_root_layer(s_picker_window));
     int visible = station_ui_visible_rows(bounds);
-    if (s_stations.selected >= s_stations.scroll_offset + visible) {
+    if (s_stations.selected >= s_stations.scroll_offset + visible)
         s_stations.scroll_offset = s_stations.selected - visible + 1;
-    }
     layer_mark_dirty(s_picker_layer);
 }
 
@@ -406,38 +340,35 @@ static void picker_click_config(void *context) {
     window_single_click_subscribe(BUTTON_ID_SELECT, picker_select_handler);
     window_single_click_subscribe(BUTTON_ID_UP, picker_up_handler);
     window_single_click_subscribe(BUTTON_ID_DOWN, picker_down_handler);
-    // BACK not subscribed — SDK default exits the app
+    // BACK not subscribed → SDK default exits app
 }
 
 static void picker_window_load(Window *window) {
     Layer *root = window_get_root_layer(window);
     GRect bounds = layer_get_bounds(root);
-
     s_picker_layer = layer_create(bounds);
     layer_set_update_proc(s_picker_layer, picker_update_proc);
     layer_add_child(root, s_picker_layer);
 }
 
-// Delayed redraw callback — fires after window transition animation completes
-static void picker_redraw_timer_callback(void *data) {
-    if (s_picker_layer) {
-        layer_mark_dirty(s_picker_layer);
-    }
-}
-
+// .appear — fires every time picker becomes visible (including after back)
+// Following pebble_arcade pattern: reset relevant state, then data is ready
+// for the next update_proc call which the SDK triggers after .appear
 static void picker_window_appear(Window *window) {
-    // Immediate mark dirty
-    if (s_picker_layer) {
-        layer_mark_dirty(s_picker_layer);
-    }
-    // Also schedule a delayed redraw — catches cases where the immediate
-    // mark_dirty is a no-op because a transition animation is pending
-    app_timer_register(100, picker_redraw_timer_callback, NULL);
+    s_status = STATUS_STATIONS_READY;
+    if (s_picker_layer) layer_mark_dirty(s_picker_layer);
 }
 
 static void picker_window_unload(Window *window) {
     layer_destroy(s_picker_layer);
     s_picker_layer = NULL;
+}
+
+// ── Tick handler ─────────────────────────────────────────────
+
+static void tick_handler(struct tm *tick_time, TimeUnits changed) {
+    update_time();
+    if (s_deps_layer) layer_mark_dirty(s_deps_layer);
 }
 
 // ── App lifecycle ────────────────────────────────────────────
@@ -448,7 +379,7 @@ static void init(void) {
     s_status = STATUS_CONNECTING;
     update_time();
 
-    // Picker window — persistent root
+    // Create BOTH windows at init (official SDK pattern)
     s_picker_window = window_create();
     window_set_background_color(s_picker_window, GColorBlack);
     window_set_click_config_provider(s_picker_window, picker_click_config);
@@ -457,9 +388,17 @@ static void init(void) {
         .appear = picker_window_appear,
         .unload = picker_window_unload,
     });
-    window_stack_push(s_picker_window, true);
 
-    // Departure window is NOT created here — created fresh on each push
+    s_deps_window = window_create();
+    window_set_background_color(s_deps_window, GColorBlack);
+    window_set_click_config_provider(s_deps_window, deps_click_config);
+    window_set_window_handlers(s_deps_window, (WindowHandlers) {
+        .load = deps_window_load,
+        .unload = deps_window_unload,
+    });
+
+    // Only push the picker (root window)
+    window_stack_push(s_picker_window, true);
 
     // AppMessage
     app_message_register_inbox_received(inbox_received_handler);
@@ -467,13 +406,13 @@ static void init(void) {
     app_message_register_outbox_failed(outbox_failed_handler);
     app_message_open(2048, 256);
 
-    // Tick timer for clock
     tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
 }
 
 static void deinit(void) {
     tick_timer_service_unsubscribe();
-    // deps_window is destroyed in its own unload handler
+    // Destroy BOTH windows at deinit (official SDK pattern)
+    window_destroy(s_deps_window);
     window_destroy(s_picker_window);
 }
 
