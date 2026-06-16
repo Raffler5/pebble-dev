@@ -18,12 +18,15 @@
 #include "transit_ui.h"
 
 // ── AppMessage keys (must match appinfo.json) ────────────────
-#define KEY_STATION    0
-#define KEY_DEPARTURES 1
-#define KEY_ERROR      2
-#define KEY_FETCH      3
+#define KEY_STATION             0
+#define KEY_DEPARTURES          1
+#define KEY_ERROR               2
+#define KEY_FETCH               3
+#define KEY_CFG_DEFAULT_STATION 4
+#define KEY_CFG_MAX_DISTANCE    5
 
 #define REFRESH_INTERVAL_S 60
+#define SETTINGS_PKEY      1    // persist storage key
 
 // ── App state ────────────────────────────────────────────────
 
@@ -42,6 +45,27 @@ static char s_error_msg[32];
 static StationListData s_stations;
 static TransitData s_transit;
 static char s_time_buf[8];
+
+// ── User settings (persisted on watch) ───────────────────────
+
+typedef struct {
+    char default_station[64];
+    int  max_distance_m;
+} UserSettings;
+
+static UserSettings s_settings;
+
+static void settings_load(void) {
+    s_settings.default_station[0] = '\0';
+    s_settings.max_distance_m = 800;
+    if (persist_exists(SETTINGS_PKEY)) {
+        persist_read_data(SETTINGS_PKEY, &s_settings, sizeof(s_settings));
+    }
+}
+
+static void settings_save(void) {
+    persist_write_data(SETTINGS_PKEY, &s_settings, sizeof(s_settings));
+}
 
 // Windows — created at init, destroyed at deinit
 static Window *s_picker_window;
@@ -200,6 +224,24 @@ static void request_departures(const char *station_id) {
 static void inbox_received_handler(DictionaryIterator *iter, void *context) {
     Tuple *t;
 
+    // ── Settings from config page ──
+    Tuple *cfg_station = dict_find(iter, KEY_CFG_DEFAULT_STATION);
+    Tuple *cfg_dist = dict_find(iter, KEY_CFG_MAX_DISTANCE);
+    if (cfg_station || cfg_dist) {
+        if (cfg_station) {
+            snprintf(s_settings.default_station, sizeof(s_settings.default_station),
+                     "%s", cfg_station->value->cstring);
+        }
+        if (cfg_dist) {
+            s_settings.max_distance_m = (int)cfg_dist->value->int32;
+        }
+        settings_save();
+        APP_LOG(APP_LOG_LEVEL_INFO, "Settings saved: station='%s' dist=%d",
+                s_settings.default_station, s_settings.max_distance_m);
+        return;
+    }
+
+    // ── Station list ──
     t = dict_find(iter, KEY_STATION);
     if (t) {
         parse_stations(t->value->cstring);
@@ -208,6 +250,7 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
         return;
     }
 
+    // ── Departures ──
     t = dict_find(iter, KEY_DEPARTURES);
     if (t) {
         parse_departures(t->value->cstring);
@@ -217,6 +260,7 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
         return;
     }
 
+    // ── Error ──
     t = dict_find(iter, KEY_ERROR);
     if (t) {
         snprintf(s_error_msg, sizeof(s_error_msg), "%s", t->value->cstring);
@@ -384,6 +428,7 @@ static void init(void) {
     memset(&s_transit, 0, sizeof(s_transit));
     s_status = STATUS_CONNECTING;
     update_time();
+    settings_load();
 
     // Create BOTH windows at init
     s_picker_window = window_create();
