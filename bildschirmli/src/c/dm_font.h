@@ -6,8 +6,9 @@
 // Lowercase / accents must be folded by dm_sanitize() before drawing.
 extern const uint8_t DM_FONT_5X7[128][7];
 
-// 6x7 bus icon — fits the 5x7 font grid (same row height as text)
-extern const uint8_t DM_BUS_ICON[7];
+// 8x11 bus icon — original SmallTV-Ultra bitmap. Drawn at pitch 1
+// (no gap between dots) so it fits within the text row height.
+extern const uint8_t DM_BUS_ICON[11];
 
 // Dot sizes — platform-adaptive
 #ifdef PBL_PLATFORM_EMERY

@@ -32,25 +32,11 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
     int content_w = w - 2 * DM_MARGIN_X;
     int y = DM_MARGIN_Y;
 
-    // Header row: station name (left) + time (right)
+    // Header: station name only — full width, no time
+    // (time is redundant on a watch showing relative departure minutes)
     char san[MAX_STATION_LEN];
     dm_sanitize(data->station, san, sizeof(san));
-
-    if (time_str && time_str[0]) {
-        // Time on the right — needs enough max_width to not truncate "HH:MM"
-        char stime[8];
-        dm_sanitize(time_str, stime, sizeof(stime));
-        int time_w = dm_text_width(stime, DM_HEADER_DOT);
-        dm_text(ctx, w - DM_MARGIN_X - time_w, y, stime,
-                time_w + dm_char_width(DM_HEADER_DOT),
-                DM_HEADER_DOT, amber);
-        // Station name on the left, truncated to leave room for time + gap
-        int gap = dm_char_width(DM_HEADER_DOT);
-        int name_max = content_w - time_w - gap;
-        dm_text(ctx, DM_MARGIN_X, y, san, name_max, DM_HEADER_DOT, amber);
-    } else {
-        dm_text(ctx, DM_MARGIN_X, y, san, content_w, DM_HEADER_DOT, amber);
-    }
+    dm_text(ctx, DM_MARGIN_X, y, san, content_w, DM_HEADER_DOT, amber);
 
     y += dm_text_height(DM_HEADER_DOT) + DM_ROW_GAP;
 
@@ -63,13 +49,16 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
     int row_char_w = dm_char_width(DM_ROW_DOT);
     int rh = row_height();
 
-    // Column widths — tight allocation to maximize direction space
-    // Line: 3 chars ("S2", "520", "13" all fit)
-    // ETA: 3 chars ("6'", "21'", "99'" all fit)
-    // Direction: gets everything that's left
+    // Column widths:
+    //   Line: 3 chars
+    //   Gap:  1 char
+    //   ETA:  3 chars (right-aligned)
+    //   Direction: everything between line+gap and ETA
     int line_col_w = 3 * row_char_w;
+    int gap_w      = row_char_w;
     int eta_col_w  = 3 * row_char_w;
-    int dir_col_w  = content_w - line_col_w - eta_col_w - 4;
+    int dir_col_w  = content_w - line_col_w - gap_w - eta_col_w;
+    int dir_x      = DM_MARGIN_X + line_col_w + gap_w;
 
     int visible = transit_ui_visible_rows(bounds);
     int offset = data->scroll_offset;
@@ -87,19 +76,18 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
         // Direction
         char sdir[MAX_DIR_LEN];
         dm_sanitize(dep->direction, sdir, sizeof(sdir));
-        dm_text(ctx, DM_MARGIN_X + line_col_w + 2, y, sdir, dir_col_w,
-                DM_ROW_DOT, amber);
+        dm_text(ctx, dir_x, y, sdir, dir_col_w, DM_ROW_DOT, amber);
 
-        // ETA
+        // ETA — bus icon for 0 min, otherwise right-aligned "N'"
         if (strcmp(dep->eta, "0") == 0) {
-            // Bus icon for "departing now" — 6x7 fits the font grid
-            int pitch = DM_ROW_DOT + 1;
-            int icon_w = 6 * pitch;
-            dm_bus_icon(ctx, w - DM_MARGIN_X - icon_w, y, DM_ROW_DOT, amber);
+            // 8x11 bus icon at pitch 1 = 8px wide, 11px tall
+            int icon_x = w - DM_MARGIN_X - 8;
+            // Center vertically in the text row
+            int icon_y = y + (dm_text_height(DM_ROW_DOT) - 11) / 2;
+            dm_bus_icon(ctx, icon_x, icon_y, DM_ROW_DOT, amber);
         } else {
             char seta[MAX_ETA_LEN + 2];
             dm_sanitize(dep->eta, seta, sizeof(seta) - 2);
-            // Append minute mark
             size_t len = strlen(seta);
             if (len < sizeof(seta) - 2) {
                 seta[len] = '\'';

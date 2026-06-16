@@ -49,17 +49,10 @@ const uint8_t DM_FONT_5X7[128][7] = {
     ['Z'] = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F},
 };
 
-// 6x7 bus icon — fits the 5x7 font grid so it aligns with text rows.
-// 6 columns wide, each byte is a row (MSB-first, top 6 bits used).
-//   ░█████░   0x7C
-//   █░░░░█   0x84
-//   ██████   0xFC
-//   █░░░░█   0x84
-//   ██████   0xFC
-//   █░██░█   0xB4
-//   ░█░░█░   0x48
-const uint8_t DM_BUS_ICON[7] = {
-    0x7C, 0x84, 0xFC, 0x84, 0xFC, 0xB4, 0x48,
+// 8x11 bus icon — original from SmallTV-Ultra / ESP32-S3.
+// 8 columns wide, MSB-first.
+const uint8_t DM_BUS_ICON[11] = {
+    0x7E, 0xC3, 0xFF, 0x81, 0x81, 0x81, 0x81, 0xFF, 0xBD, 0xFF, 0x42,
 };
 
 int dm_char_width(uint8_t dot_size) {
@@ -135,15 +128,18 @@ int dm_text(GContext *ctx, int x, int y, const char *text, int max_width,
 }
 
 void dm_bus_icon(GContext *ctx, int x, int y, uint8_t dot_size, GColor color) {
-    int pitch = dot_size + 1;
-    graphics_context_set_fill_color(ctx, color);  // icon sets its own color
+    // Draw at pitch 1 (1px per dot, no gap) regardless of dot_size.
+    // This keeps the 8x11 icon compact enough to fit within text row height.
+    // At pitch 1: 8px wide × 11px tall — fits in ~14px row height.
+    (void)dot_size;  // not used — always pitch 1
+    graphics_context_set_fill_color(ctx, color);
 
-    for (int row = 0; row < 7; row++) {
+    for (int row = 0; row < 11; row++) {
         uint8_t bits = DM_BUS_ICON[row];
-        for (int col = 0; col < 6; col++) {
+        for (int col = 0; col < 8; col++) {
             if (bits & (0x80 >> col)) {
                 graphics_fill_rect(ctx,
-                    GRect(x + col * pitch, y + row * pitch, dot_size, dot_size),
+                    GRect(x + col, y + row, 1, 1),
                     0, GCornerNone);
             }
         }
