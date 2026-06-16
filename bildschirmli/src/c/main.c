@@ -418,16 +418,21 @@ static void picker_window_load(Window *window) {
     layer_add_child(root, s_picker_layer);
 }
 
-static void picker_window_appear(Window *window) {
-    // Force redraw when returning from departure screen
+// Delayed redraw callback — fires after window transition animation completes
+static void picker_redraw_timer_callback(void *data) {
     if (s_picker_layer) {
         layer_mark_dirty(s_picker_layer);
     }
-    // Also mark the root layer dirty as a fallback
-    Layer *root = window_get_root_layer(window);
-    if (root) {
-        layer_mark_dirty(root);
+}
+
+static void picker_window_appear(Window *window) {
+    // Immediate mark dirty
+    if (s_picker_layer) {
+        layer_mark_dirty(s_picker_layer);
     }
+    // Also schedule a delayed redraw — catches cases where the immediate
+    // mark_dirty is a no-op because a transition animation is pending
+    app_timer_register(100, picker_redraw_timer_callback, NULL);
 }
 
 static void picker_window_unload(Window *window) {
