@@ -2,7 +2,7 @@
 
 #include <pebble.h>
 
-#define MAX_STATIONS     6
+#define MAX_STATIONS     10
 #define MAX_STATION_NAME 36
 #define MAX_STATION_ID   12
 

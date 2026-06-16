@@ -3,71 +3,158 @@
 // Features:
 //   - GPS → find nearby stations → send to watch
 //   - Fetch departures for selected station
-//   - Settings page (default station, max distance)
+//   - Settings page with station search + multiple favorites
 
-var MAX_STATIONS = 6;
+var MAX_STATIONS = 10;
 var MAX_DEPARTURES = 12;
 var DEFAULT_MAX_DISTANCE = 800;
 
-// ── Settings (persisted in localStorage) ─────────────────────
+// ── Settings ─────────────────────────────────────────────────
 
 function loadSettings() {
     var raw = localStorage.getItem('bildschirmli-settings');
     if (raw) {
-        try { return JSON.parse(raw); } catch(e) {}
+        try {
+            var s = JSON.parse(raw);
+            // Migration from v1 single station to v2 array
+            if (s.defaultStation && !s.favorites) {
+                s.favorites = [{ name: s.defaultStation, id: '' }];
+                delete s.defaultStation;
+            }
+            return s;
+        } catch(e) {}
     }
-    return { defaultStation: '', maxDistance: DEFAULT_MAX_DISTANCE };
+    return { favorites: [], maxDistance: DEFAULT_MAX_DISTANCE };
 }
 
 function saveSettings(s) {
     localStorage.setItem('bildschirmli-settings', JSON.stringify(s));
 }
 
-// ── Configuration page (embedded HTML) ───────────────────────
+// ── Configuration page ───────────────────────────────────────
 
 function openConfigPage() {
     var settings = loadSettings();
+    var favsJSON = JSON.stringify(settings.favorites || []);
 
     var html = '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width">' +
         '<style>' +
+        '*{box-sizing:border-box}' +
         'body{font-family:-apple-system,Helvetica,sans-serif;background:#1a1a1a;color:#e0e0e0;' +
-        'margin:0;padding:20px;font-size:16px}' +
-        'h1{color:#ffaa00;font-size:20px;margin:0 0 20px}' +
-        'label{display:block;margin:16px 0 6px;color:#ffaa00;font-size:14px}' +
-        'input[type=text]{width:100%;box-sizing:border-box;padding:10px;background:#2a2a2a;' +
-        'color:#e0e0e0;border:1px solid #ffaa00;border-radius:4px;font-size:16px}' +
+        'margin:0;padding:16px;font-size:15px}' +
+        'h1{color:#ffaa00;font-size:20px;margin:0 0 16px}' +
+        'h2{color:#ffaa00;font-size:14px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px}' +
+        'input[type=text]{width:100%;padding:10px;background:#2a2a2a;' +
+        'color:#e0e0e0;border:1px solid #555;border-radius:4px;font-size:15px}' +
+        'input[type=text]:focus{border-color:#ffaa00;outline:none}' +
         'input[type=range]{width:100%;margin:8px 0}' +
-        '.val{color:#ffaa00;font-size:14px}' +
+        '.val{color:#ffaa00}' +
         '.desc{color:#888;font-size:12px;margin:4px 0 0}' +
-        'button{width:100%;padding:14px;margin:24px 0;background:#ffaa00;color:#1a1a1a;' +
+
+        '.fav{display:flex;align-items:center;padding:8px;margin:4px 0;' +
+        'background:#2a2a2a;border-radius:4px;border-left:3px solid #ffaa00}' +
+        '.fav .name{flex:1;color:#e0e0e0}' +
+        '.fav .id{color:#888;font-size:11px;margin-left:4px}' +
+        '.fav .rm{color:#ff4444;cursor:pointer;padding:4px 8px;font-size:18px;' +
+        'background:none;border:none}' +
+        '.empty{color:#666;font-style:italic;padding:8px}' +
+
+        '.search-box{display:flex;gap:8px;margin:8px 0}' +
+        '.search-box input{flex:1}' +
+        '.search-btn{padding:10px 16px;background:#ffaa00;color:#1a1a1a;border:none;' +
+        'border-radius:4px;font-weight:bold;cursor:pointer;white-space:nowrap}' +
+        '.search-btn:active{background:#cc8800}' +
+
+        '.result{display:flex;align-items:center;padding:8px;margin:4px 0;' +
+        'background:#222;border-radius:4px;cursor:pointer;border:1px solid #333}' +
+        '.result:active{background:#333;border-color:#ffaa00}' +
+        '.result .name{flex:1}' +
+        '.result .add{color:#ffaa00;font-size:20px;padding:0 8px}' +
+        '.searching{color:#888;padding:8px;font-style:italic}' +
+
+        'button.save{width:100%;padding:14px;margin:20px 0;background:#ffaa00;color:#1a1a1a;' +
         'border:none;border-radius:4px;font-size:18px;font-weight:bold;cursor:pointer}' +
-        'button:active{background:#cc8800}' +
+        'button.save:active{background:#cc8800}' +
         '</style></head><body>' +
-        '<h1>Bildschirmli Settings</h1>' +
 
-        '<label>Default Station</label>' +
-        '<input type="text" id="station" value="' + (settings.defaultStation || '') + '" ' +
-        'placeholder="e.g. Bern, Bahnhof">' +
-        '<p class="desc">Always show this station in the picker. Leave empty for GPS only.</p>' +
+        '<h1>Bildschirmli</h1>' +
 
-        '<label>Max Distance: <span class="val" id="distval">' + settings.maxDistance + 'm</span></label>' +
+        // Favorite stations
+        '<h2>Favorite Stations</h2>' +
+        '<div id="favs"></div>' +
+
+        // Search
+        '<h2>Add Station</h2>' +
+        '<div class="search-box">' +
+        '<input type="text" id="q" placeholder="Search station...">' +
+        '<button class="search-btn" onclick="search()">Find</button>' +
+        '</div>' +
+        '<div id="results"></div>' +
+        '<p class="desc">Search by name (e.g. "Bern Bahnhof", "Stettbach"). Tap a result to add it to favorites.</p>' +
+
+        // Max distance
+        '<h2>Nearby Search Radius</h2>' +
+        '<p>Max distance: <span class="val" id="distval">' + settings.maxDistance + 'm</span></p>' +
         '<input type="range" id="distance" min="200" max="2000" step="100" ' +
         'value="' + settings.maxDistance + '" ' +
         'oninput="document.getElementById(\'distval\').textContent=this.value+\'m\'">' +
-        '<p class="desc">Search radius for nearby stations (200m – 2000m)</p>' +
+        '<p class="desc">GPS stations beyond this distance are hidden (200m – 2000m)</p>' +
 
-        '<button onclick="submit()">Save</button>' +
+        // Save
+        '<button class="save" onclick="submit()">Save Settings</button>' +
 
         '<script>' +
+        'var favs=' + favsJSON + ';' +
+
+        'function renderFavs(){' +
+        'var el=document.getElementById("favs");' +
+        'if(!favs.length){el.innerHTML="<div class=\\"empty\\">No favorites yet — search and add below</div>";return;}' +
+        'var h="";' +
+        'for(var i=0;i<favs.length;i++){' +
+        'h+="<div class=\\"fav\\"><span class=\\"name\\">"+favs[i].name+"</span>";' +
+        'if(favs[i].id)h+="<span class=\\"id\\">"+favs[i].id+"</span>";' +
+        'h+="<button class=\\"rm\\" onclick=\\"rmFav("+i+")\\">&times;</button></div>";}' +
+        'el.innerHTML=h;}' +
+
+        'function rmFav(i){favs.splice(i,1);renderFavs();}' +
+
+        'function addFav(name,id){' +
+        'for(var i=0;i<favs.length;i++){if(favs[i].id===id)return;}' +
+        'favs.push({name:name,id:id});renderFavs();' +
+        'document.getElementById("results").innerHTML="<div class=\\"empty\\">Added!</div>";}' +
+
+        'function search(){' +
+        'var q=document.getElementById("q").value.trim();' +
+        'if(!q){return;}' +
+        'document.getElementById("results").innerHTML="<div class=\\"searching\\">Searching...</div>";' +
+        'var xhr=new XMLHttpRequest();' +
+        'xhr.timeout=10000;' +
+        'xhr.onload=function(){' +
+        'try{var j=JSON.parse(this.responseText);' +
+        'var h="";' +
+        'if(!j.stations||!j.stations.length){h="<div class=\\"empty\\">No stations found</div>";}' +
+        'else{for(var i=0;i<Math.min(j.stations.length,8);i++){' +
+        'var s=j.stations[i];if(!s.id||!s.name)continue;' +
+        'h+="<div class=\\"result\\" onclick=\\"addFav(\'"+s.name.replace(/\'/g,"\\\\\\'")+"\',\'"+s.id+"\')\\">"+' +
+        '"<span class=\\"name\\">"+s.name+"</span><span class=\\"add\\">+</span></div>";}}' +
+        'document.getElementById("results").innerHTML=h;' +
+        '}catch(e){document.getElementById("results").innerHTML="<div class=\\"empty\\">Error parsing results</div>";}};' +
+        'xhr.onerror=function(){document.getElementById("results").innerHTML="<div class=\\"empty\\">Network error</div>";};' +
+        'xhr.open("GET","https://transport.opendata.ch/v1/locations?query="+encodeURIComponent(q)+"&type=station&limit=8");' +
+        'xhr.send();}' +
+
+        // Enter key triggers search
+        'document.getElementById("q").addEventListener("keyup",function(e){if(e.keyCode===13)search();});' +
+
         'function submit(){' +
         'var s=JSON.stringify({' +
-        'defaultStation:document.getElementById("station").value,' +
+        'favorites:favs,' +
         'maxDistance:parseInt(document.getElementById("distance").value)' +
         '});' +
-        'var loc="pebblejs://close#"+encodeURIComponent(s);' +
-        'document.location.href=loc;}' +
-        '</script>' +
-        '</body></html>';
+        'document.location.href="pebblejs://close#"+encodeURIComponent(s);}' +
+
+        'renderFavs();' +
+        '</script></body></html>';
 
     Pebble.openURL('data:text/html,' + encodeURIComponent(html));
 }
@@ -125,7 +212,7 @@ function sanitizeDirection(stationFull, rawTo) {
     return rawTo;
 }
 
-// ── Format and send station list to watch ────────────────────
+// ── Send stations to watch ───────────────────────────────────
 
 function sendStationsToWatch(entries) {
     entries.sort(function(a, b) { return a.distance - b.distance; });
@@ -134,19 +221,16 @@ function sendStationsToWatch(entries) {
         Pebble.sendAppMessage({ 'KEY_ERROR': 'No stops found' });
         return;
     }
-
     var result = '';
     for (var j = 0; j < count; j++) {
         result += entries[j].city + '|' + entries[j].stop + ':' +
                   entries[j].id + ':' + entries[j].distance + ';';
     }
     result += '%';
-
-    console.log('Bildschirmli: sending ' + count + ' stations');
     Pebble.sendAppMessage({ 'KEY_STATION': result });
 }
 
-// ── Phase 1: Find stations ───────────────────────────────────
+// ── Find stations ────────────────────────────────────────────
 
 var s_userLat = 0;
 var s_userLon = 0;
@@ -154,50 +238,64 @@ var s_userLon = 0;
 function findStations() {
     var settings = loadSettings();
     var maxDist = settings.maxDistance || DEFAULT_MAX_DISTANCE;
-    var defaultStation = settings.defaultStation || '';
+    var favorites = settings.favorites || [];
 
-    // If default station is configured, search by name AND by GPS
-    if (defaultStation) {
-        // First fetch the default station by name
-        var nameUrl = 'http://transport.opendata.ch/v1/locations?query=' +
-                      encodeURIComponent(defaultStation) +
-                      '&type=station&limit=1';
+    // Build favorite entries (distance = 0, pinned at top)
+    var favEntries = [];
+    var favPending = favorites.length;
 
-        xhrGet(nameUrl, function(err, resp) {
-            var defaultEntries = [];
-            if (!err && resp) {
-                try {
-                    var json = JSON.parse(resp);
-                    if (json.stations && json.stations.length > 0) {
-                        var st = json.stations[0];
-                        var parts = splitStationName(st.name);
-                        defaultEntries.push({
-                            city: parts.city, stop: parts.stop,
-                            id: st.id, distance: 0  // distance 0 = pinned
-                        });
-                    }
-                } catch(e) {}
+    if (favPending === 0) {
+        // No favorites — just GPS
+        findGPSStations(maxDist, function(gpsEntries) {
+            sendStationsToWatch(gpsEntries);
+        });
+        return;
+    }
+
+    // Resolve each favorite by ID or name
+    var resolved = 0;
+    for (var i = 0; i < favorites.length; i++) {
+        (function(fav) {
+            var url;
+            if (fav.id) {
+                url = 'http://transport.opendata.ch/v1/locations?query=' +
+                      encodeURIComponent(fav.id) + '&type=station&limit=1';
+            } else {
+                url = 'http://transport.opendata.ch/v1/locations?query=' +
+                      encodeURIComponent(fav.name) + '&type=station&limit=1';
             }
-
-            // Then also find GPS-nearby stations
-            findGPSStations(maxDist, function(gpsEntries) {
-                // Merge: default station first, then GPS (dedup by ID)
-                var merged = defaultEntries.slice();
-                for (var i = 0; i < gpsEntries.length; i++) {
-                    var isDup = false;
-                    for (var j = 0; j < merged.length; j++) {
-                        if (merged[j].id === gpsEntries[i].id) { isDup = true; break; }
-                    }
-                    if (!isDup) merged.push(gpsEntries[i]);
+            xhrGet(url, function(err, resp) {
+                if (!err && resp) {
+                    try {
+                        var json = JSON.parse(resp);
+                        if (json.stations && json.stations.length > 0) {
+                            var st = json.stations[0];
+                            var parts = splitStationName(st.name);
+                            favEntries.push({
+                                city: parts.city, stop: parts.stop,
+                                id: st.id, distance: 0
+                            });
+                        }
+                    } catch(e) {}
                 }
-                sendStationsToWatch(merged);
+                resolved++;
+                if (resolved === favPending) {
+                    // All favorites resolved — now get GPS stations
+                    findGPSStations(maxDist, function(gpsEntries) {
+                        // Merge: favorites first, then GPS (dedup by ID)
+                        var merged = favEntries.slice();
+                        for (var g = 0; g < gpsEntries.length; g++) {
+                            var isDup = false;
+                            for (var f = 0; f < merged.length; f++) {
+                                if (merged[f].id === gpsEntries[g].id) { isDup = true; break; }
+                            }
+                            if (!isDup) merged.push(gpsEntries[g]);
+                        }
+                        sendStationsToWatch(merged);
+                    });
+                }
             });
-        });
-    } else {
-        // GPS only
-        findGPSStations(maxDist, function(entries) {
-            sendStationsToWatch(entries);
-        });
+        })(favorites[i]);
     }
 }
 
@@ -206,20 +304,14 @@ function findGPSStations(maxDist, callback) {
         function(pos) {
             s_userLat = pos.coords.latitude;
             s_userLon = pos.coords.longitude;
-
             var url = 'http://transport.opendata.ch/v1/locations?x=' +
                       s_userLat + '&y=' + s_userLon +
                       '&type=station&limit=15';
-
             xhrGet(url, function(err, responseText) {
-                if (err || !responseText) {
-                    callback([]);
-                    return;
-                }
+                if (err || !responseText) { callback([]); return; }
                 var json;
                 try { json = JSON.parse(responseText); } catch(e) { callback([]); return; }
                 if (!json.stations) { callback([]); return; }
-
                 var entries = [];
                 for (var i = 0; i < json.stations.length; i++) {
                     var st = json.stations[i];
@@ -239,14 +331,13 @@ function findGPSStations(maxDist, callback) {
         },
         function(err) {
             console.log('Bildschirmli: GPS error: ' + err.message);
-            Pebble.sendAppMessage({ 'KEY_ERROR': 'GPS unavailable' });
             callback([]);
         },
         { timeout: 15000, maximumAge: 60000 }
     );
 }
 
-// ── Phase 2: Fetch departures ────────────────────────────────
+// ── Fetch departures ─────────────────────────────────────────
 
 function fetchDepartures(stationId) {
     var url = 'http://transport.opendata.ch/v1/stationboard?id=' + stationId +
@@ -279,7 +370,6 @@ function fetchDepartures(stationId) {
             var line = entry.number || '?';
             var dir = sanitizeDirection(stationName, entry.to);
             dir = dir.replace(/Bahnhof/g, 'Bhf').replace(/Strasse/g, 'Str').replace(/strasse/g, 'str');
-
             var depTime = 0;
             if (entry.stop) {
                 if (entry.stop.prognosis && entry.stop.prognosis.departureTimestamp)
@@ -291,7 +381,6 @@ function fetchDepartures(stationId) {
             result += line + ':' + dir + ':' + minutes + ';';
         }
         result += '%';
-
         Pebble.sendAppMessage({ 'KEY_DEPARTURES': result });
     });
 }
@@ -308,7 +397,6 @@ Pebble.addEventListener('appmessage', function(e) {
     if (e.payload.KEY_STATION) findStations();
 });
 
-// Settings page — gear icon in Pebble app
 Pebble.addEventListener('showConfiguration', function(e) {
     openConfigPage();
 });
@@ -318,14 +406,8 @@ Pebble.addEventListener('webviewclosed', function(e) {
     try {
         var settings = JSON.parse(decodeURIComponent(e.response));
         saveSettings(settings);
-        console.log('Bildschirmli: settings saved: ' + JSON.stringify(settings));
-
-        // Send settings to watch for persistent storage
-        Pebble.sendAppMessage({
-            'KEY_CFG_DEFAULT_STATION': settings.defaultStation || '',
-            'KEY_CFG_MAX_DISTANCE': settings.maxDistance || DEFAULT_MAX_DISTANCE
-        });
-
+        console.log('Bildschirmli: settings saved, ' +
+                    (settings.favorites ? settings.favorites.length : 0) + ' favorites');
         // Refresh stations with new settings
         findStations();
     } catch(ex) {
