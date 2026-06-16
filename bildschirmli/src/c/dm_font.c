@@ -49,21 +49,19 @@ const uint8_t DM_FONT_5X7[128][7] = {
     ['Z'] = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F},
 };
 
-// 8x9 bus icon — scaled from the 8x11 original (2 body rows removed).
-// Preserves roof, windows, divider, body (2 rows), floor, wheel wells,
-// undercarriage, wheels. Drawn at text pitch.
+// 8x8 bus icon — scaled from the 8x11 original.
+// Removed 2 body rows + windows row to fit in row height at text pitch.
 //
 //   .██████.  0x7E  roof
-//   ██....██  0xC3  windows
-//   ████████  0xFF  divider
+//   ████████  0xFF  solid top
 //   █......█  0x81  body
 //   █......█  0x81  body
 //   ████████  0xFF  floor
 //   █.████.█  0xBD  wheel wells
 //   ████████  0xFF  undercarriage
 //   .█....█.  0x42  wheels
-const uint8_t DM_BUS_ICON[9] = {
-    0x7E, 0xC3, 0xFF, 0x81, 0x81, 0xFF, 0xBD, 0xFF, 0x42,
+const uint8_t DM_BUS_ICON[DM_BUS_ROWS] = {
+    0x7E, 0xFF, 0x81, 0x81, 0xFF, 0xBD, 0xFF, 0x42,
 };
 
 int dm_char_width(uint8_t dot_size) {
@@ -144,7 +142,7 @@ void dm_bus_icon(GContext *ctx, int x, int y, uint8_t dot_size, GColor color) {
     int pitch = dot_size + 1;
     graphics_context_set_fill_color(ctx, color);
 
-    for (int row = 0; row < 9; row++) {
+    for (int row = 0; row < DM_BUS_ROWS; row++) {
         uint8_t bits = DM_BUS_ICON[row];
         for (int col = 0; col < 8; col++) {
             if (bits & (0x80 >> col)) {

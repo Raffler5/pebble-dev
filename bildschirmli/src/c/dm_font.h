@@ -6,10 +6,12 @@
 // Lowercase / accents must be folded by dm_sanitize() before drawing.
 extern const uint8_t DM_FONT_5X7[128][7];
 
-// 8x9 bus icon — scaled from the 8x11 original (2 body rows removed).
-// Drawn at text pitch (DM_ROW_DOT+1). 9 rows × pitch 2 = 18px on basalt,
-// fits within the 19px row height (14px text + 5px gap).
-extern const uint8_t DM_BUS_ICON[9];
+// 8x8 bus icon — scaled from 8x11 original (2 body rows + windows removed).
+// Drawn at text pitch (DM_ROW_DOT+1). 8 rows × pitch 2 = 16px on basalt,
+// fits in 19px row height with 3px clearance.
+#define DM_BUS_ROWS 8
+#define DM_BUS_COLS 8
+extern const uint8_t DM_BUS_ICON[DM_BUS_ROWS];
 
 // Dot sizes — platform-adaptive
 #ifdef PBL_PLATFORM_EMERY
