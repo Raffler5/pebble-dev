@@ -160,4 +160,70 @@ This is valid C99 but **not valid C++**. Pebble SDK compiles `.c` files as C, so
 
 ---
 
+## 7. UUID Must Be Valid Hexadecimal
+
+**Symptom:** CloudPebble ignores the UUID in `appinfo.json` and generates its own. Every build produces a `.pbw` with a different UUID. Publishing/updating fails because the UUID doesn't match.
+
+**Root cause:** UUIDs are 128-bit numbers encoded as hexadecimal. Valid hex chars are `0-9` and `a-f` only. If the UUID contains letters outside this range (like `l`, `o`, `g`, `s`), CloudPebble can't parse it and falls back to a random UUID.
+
+**Example:**
+```
+WRONG:  b1ld5c41-0001-4e62-b1e0-cafe12345678   ← 'l' is not hex
+RIGHT:  b11d5c41-0001-4e62-b1e0-cafe12345678   ← '1' replaces 'l'
+```
+
+Vanity UUIDs are fine — just stick to `0-9` and `a-f`. Good vanity chars: `a`, `b`, `c`, `d`, `e`, `f`, `0` (looks like `O`), `1` (looks like `l`), `5` (looks like `S`).
+
+**Rule:** `echo "$UUID" | grep -qE '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'` — if it fails, the UUID is invalid.
+
+---
+
+## 8. AppMessage Race Condition — One In-Flight Message
+
+**Symptom:** Settings (e.g., colors) saved on phone config page are never applied on the watch. Or station data fails to arrive after saving settings.
+
+**Root cause:** PebbleKit JS can only have **one AppMessage in flight** at a time. If you call `Pebble.sendAppMessage()` before the previous message is acknowledged, the second message is silently dropped.
+
+This is easy to trigger: save settings → send color config to watch → immediately call `findStations()` which sends a station message. If GPS position is cached, the station message fires before the color message is ACK'd.
+
+**Fix:** Chain messages via the success/error callback:
+```javascript
+// WRONG — race condition
+Pebble.sendAppMessage(colorMsg);
+findStations();  // eventually calls sendAppMessage again
+
+// RIGHT — wait for ACK before sending next
+Pebble.sendAppMessage(colorMsg, function() {
+    findStations();
+}, function() {
+    findStations();  // still refresh on error
+});
+```
+
+**Rule:** Never call `sendAppMessage` twice without waiting for the first to complete. Always use the callback to chain.
+
+---
+
+## 9. Data URI Config Page — Missing charset=utf-8
+
+**Symptom:** Station names with umlauts (ü, ö, ä, é) look garbled in the favorites list when reopening the config page. But search results (loaded dynamically via XHR) display correctly.
+
+**Root cause:** The settings page is served as a `data:text/html,...` URI. Without an explicit charset declaration, the phone's browser may default to Latin-1 when parsing the initial HTML. Station names with UTF-8 multi-byte characters (baked into the HTML as `var favs=[...]`) get misinterpreted.
+
+Dynamically loaded content (XHR → JSON.parse → innerHTML) is unaffected because JavaScript handles Unicode internally — the encoding issue only hits the static HTML source.
+
+**Fix:** Declare charset in both the data URI and the HTML meta tag:
+```javascript
+// WRONG
+Pebble.openURL('data:text/html,' + encodeURIComponent(html));
+
+// RIGHT
+var html = '<!DOCTYPE html><html><head><meta charset="utf-8">...';
+Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+```
+
+**Rule:** Always add `charset=utf-8` to data URIs containing non-ASCII text, and include `<meta charset="utf-8">` in the HTML head.
+
+---
+
 *Accumulated during Bildschirmli Pebble development, June 2026*

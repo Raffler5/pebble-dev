@@ -37,7 +37,7 @@ function openConfigPage() {
     var settings = loadSettings();
     var favsJSON = JSON.stringify(settings.favorites || []);
 
-    var html = '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width">' +
+    var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">' +
         '<style>' +
         '*{box-sizing:border-box}' +
         'body{font-family:-apple-system,Helvetica,sans-serif;background:#1a1a1a;color:#e0e0e0;' +
@@ -205,7 +205,7 @@ function openConfigPage() {
         'updatePreview();' +
         '</script></body></html>';
 
-    Pebble.openURL('data:text/html,' + encodeURIComponent(html));
+    Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -459,16 +459,20 @@ Pebble.addEventListener('webviewclosed', function(e) {
                     (settings.favorites ? settings.favorites.length : 0) + ' favorites' +
                     ', color=' + settings.colorArgb8);
 
-        // Send colors to watch for persistent storage
-        if (settings.colorArgb8 || settings.bgColorArgb8) {
-            var msg = {};
-            if (settings.colorArgb8) msg['KEY_CFG_COLOR'] = settings.colorArgb8;
-            if (settings.bgColorArgb8) msg['KEY_CFG_BG_COLOR'] = settings.bgColorArgb8;
-            Pebble.sendAppMessage(msg);
+        // Send colors to watch, then refresh stations
+        // (PebbleKit JS allows only one in-flight message — must chain)
+        var msg = {};
+        if (settings.colorArgb8) msg['KEY_CFG_COLOR'] = settings.colorArgb8;
+        if (settings.bgColorArgb8) msg['KEY_CFG_BG_COLOR'] = settings.bgColorArgb8;
+        if (msg['KEY_CFG_COLOR'] || msg['KEY_CFG_BG_COLOR']) {
+            Pebble.sendAppMessage(msg, function() {
+                findStations();
+            }, function() {
+                findStations();
+            });
+        } else {
+            findStations();
         }
-
-        // Refresh stations with new settings
-        findStations();
     } catch(ex) {
         console.log('Bildschirmli: settings parse error: ' + ex);
     }

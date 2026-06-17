@@ -42,11 +42,14 @@ The `"configurable"` capability makes the gear icon appear next to the app in th
 
 ### 2. Build the HTML page in JS
 
+**Important:** Always declare `charset=utf-8` in both the HTML meta tag and the data URI. Without this, non-ASCII characters (umlauts, accents) embedded in the HTML template will display as garbled text. See COMMON_PITFALLS.md §9 for details.
+
 ```javascript
 function openConfigPage() {
     var settings = loadSettings();
 
     var html = '<!DOCTYPE html><html><head>' +
+        '<meta charset="utf-8">' +      // ← required for non-ASCII
         '<meta name="viewport" content="width=device-width">' +
         '<style>/* your CSS */</style>' +
         '</head><body>' +
@@ -59,7 +62,8 @@ function openConfigPage() {
         '}' +
         '</script></body></html>';
 
-    Pebble.openURL('data:text/html,' + encodeURIComponent(html));
+    // charset=utf-8 in the data URI too
+    Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 }
 ```
 
@@ -201,18 +205,49 @@ function esc(s) {
 
 ---
 
+## AppMessage Sequencing After Config Save
+
+When `webviewclosed` fires, you often need to both send settings to the watch AND refresh app data. Both use `sendAppMessage`, but PebbleKit JS only allows one message in flight at a time. **Always chain via callbacks:**
+
+```javascript
+Pebble.addEventListener('webviewclosed', function(e) {
+    if (!e.response) return;
+    var settings = JSON.parse(decodeURIComponent(e.response));
+    saveSettings(settings);
+
+    // Send settings to watch, THEN refresh data
+    var msg = {};
+    if (settings.color) msg['KEY_CFG_COLOR'] = settings.color;
+    if (settings.bgColor) msg['KEY_CFG_BG_COLOR'] = settings.bgColor;
+
+    if (Object.keys(msg).length > 0) {
+        Pebble.sendAppMessage(msg, function() {
+            refreshData();  // only after ACK
+        }, function() {
+            refreshData();  // also on error
+        });
+    } else {
+        refreshData();
+    }
+});
+```
+
+See COMMON_PITFALLS.md §8 for details on why this is necessary.
+
+---
+
 ## Data Flow Summary
 
 ```
 User taps gear icon
     → Pebble fires 'showConfiguration'
-    → JS opens data:text/html page with current settings pre-filled
+    → JS opens data:text/html;charset=utf-8 page with current settings pre-filled
     → User modifies settings, taps Save
     → Page navigates to pebblejs://close#{encoded JSON}
     → Pebble fires 'webviewclosed' with e.response = encoded JSON
     → JS parses, saves to localStorage
-    → JS optionally sends to watch via AppMessage
-    → JS refreshes app data with new settings
+    → JS sends settings to watch via AppMessage (wait for ACK)
+    → JS refreshes app data with new settings (in sendAppMessage callback)
 ```
 
 ---
