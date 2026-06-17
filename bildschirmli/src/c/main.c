@@ -64,7 +64,11 @@ static void settings_load(void) {
     if (persist_exists(SETTINGS_PKEY)) {
         persist_read_data(SETTINGS_PKEY, &s_settings, sizeof(s_settings));
     }
-    // Apply color
+    // Validate color — old persisted settings may have garbage in the new field.
+    // Valid ARGB8 has alpha bits = 0b11 (0xC0). If not, reset to default.
+    if ((s_settings.color_argb8 & 0xC0) != 0xC0) {
+        s_settings.color_argb8 = DM_COLOR_DEFAULT;
+    }
     dm_color_argb8 = s_settings.color_argb8;
 }
 
