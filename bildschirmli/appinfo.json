@@ -3,7 +3,7 @@
   "shortName": "Bildschirmli",
   "longName": "Bildschirmli - Swiss Transit",
   "companyName": "Raffler5",
-  "versionLabel": "0.2.0",
+  "versionLabel": "0.2.1",
   "sdkVersion": "3",
   "targetPlatforms": ["basalt", "emery"],
   "watchapp": {
