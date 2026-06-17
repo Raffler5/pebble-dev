@@ -130,7 +130,7 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
 }
 
 void transit_ui_draw_detail(GContext *ctx, GRect bounds, const TransitData *data,
-                            int dep_index) {
+                            int dep_index, const RouteData *route) {
     GColor amber = DM_COLOR_CURRENT();
     GColor black = DM_BG_CURRENT();
     int w = bounds.size.w;
@@ -146,8 +146,9 @@ void transit_ui_draw_detail(GContext *ctx, GRect bounds, const TransitData *data
 
     const Departure *dep = &data->departures[dep_index];
     int y = DM_MARGIN_Y;
+    int rh = dm_text_height(DM_ROW_DOT) + DM_ROW_GAP + 2;
 
-    // Header: line number (large)
+    // Header: line (large)
     char sline[MAX_LINE_LEN];
     dm_sanitize(dep->line, sline, sizeof(sline));
     dm_text(ctx, DM_MARGIN_X, y, sline, content_w, DM_HEADER_DOT, amber);
@@ -158,37 +159,35 @@ void transit_ui_draw_detail(GContext *ctx, GRect bounds, const TransitData *data
     graphics_draw_line(ctx, GPoint(DM_MARGIN_X, y), GPoint(w - DM_MARGIN_X - 1, y));
     y += DM_ROW_GAP + 2;
 
-    int rh = dm_text_height(DM_ROW_DOT) + DM_ROW_GAP + 4;
-
-    // Direction (full, untruncated — may wrap to label+value)
+    // Row 1: direction + ETA right-aligned
     char sdir[MAX_DIR_LEN];
     dm_sanitize(dep->direction, sdir, sizeof(sdir));
-    dm_text(ctx, DM_MARGIN_X, y, sdir, content_w, DM_ROW_DOT, amber);
-    y += rh;
 
-    // ETA
+    int row_char_w = dm_char_width(DM_ROW_DOT);
+    int eta_col_w = 4 * row_char_w;  // enough for "99'" or bus icon
+    int dir_col_w = content_w - eta_col_w;
+
+    dm_text(ctx, DM_MARGIN_X, y, sdir, dir_col_w, DM_ROW_DOT, amber);
+
     if (strcmp(dep->eta, "0") == 0) {
         int pitch = DM_ROW_DOT + 1;
         int icon_w = 8 * pitch;
-        dm_bus_icon(ctx, DM_MARGIN_X, y, DM_ROW_DOT, amber);
-        dm_text(ctx, DM_MARGIN_X + icon_w + pitch, y, "NOW", content_w,
-                DM_ROW_DOT, amber);
+        dm_bus_icon(ctx, w - DM_MARGIN_X - icon_w, y, DM_ROW_DOT, amber);
     } else {
-        char seta[MAX_ETA_LEN + 6];
-        dm_sanitize(dep->eta, seta, sizeof(seta) - 6);
+        char seta[MAX_ETA_LEN + 2];
+        dm_sanitize(dep->eta, seta, sizeof(seta) - 2);
         size_t len = strlen(seta);
-        if (len < sizeof(seta) - 6) {
-            seta[len] = ' ';
-            seta[len + 1] = 'M';
-            seta[len + 2] = 'I';
-            seta[len + 3] = 'N';
-            seta[len + 4] = '\0';
+        if (len < sizeof(seta) - 2) {
+            seta[len] = '\'';
+            seta[len + 1] = '\0';
         }
-        dm_text(ctx, DM_MARGIN_X, y, seta, content_w, DM_ROW_DOT, amber);
+        int eta_w = dm_text_width(seta, DM_ROW_DOT);
+        dm_text(ctx, w - DM_MARGIN_X - eta_w, y, seta, eta_col_w,
+                DM_ROW_DOT, amber);
     }
     y += rh;
 
-    // Platform (if available)
+    // Row 2: platform (if available)
     if (dep->platform[0]) {
         char label[MAX_PLATFORM_LEN + 4];
         char splat[MAX_PLATFORM_LEN];
@@ -198,11 +197,63 @@ void transit_ui_draw_detail(GContext *ctx, GRect bounds, const TransitData *data
         y += rh;
     }
 
-    // Station name at bottom
-    y += DM_ROW_GAP;
+    // Separator before route
+    graphics_draw_line(ctx, GPoint(DM_MARGIN_X, y), GPoint(w - DM_MARGIN_X - 1, y));
+    y += DM_ROW_GAP + 2;
+
+    // Current station
     char san[MAX_STATION_LEN];
     dm_sanitize(data->station, san, sizeof(san));
     dm_text(ctx, DM_MARGIN_X, y, san, content_w, DM_ROW_DOT, amber);
+    y += rh;
+
+    // Route stops
+    if (!route || route->loading) {
+        dm_text(ctx, DM_MARGIN_X, y, "...", content_w, DM_ROW_DOT, amber);
+    } else if (route->valid && route->count > 0) {
+        int max_y = bounds.size.h - DM_MARGIN_Y;
+        int stop_rows = (max_y - y) / rh;
+        if (stop_rows < 1) stop_rows = 1;
+
+        int offset = route->scroll_offset;
+        int remaining = route->count - offset;
+
+        for (int i = 0; i < stop_rows && i < remaining; i++) {
+            int si = offset + i;
+            // If we're on the last visible row and there are more stops after,
+            // show "..." unless we're showing the actual last stop
+            if (i == stop_rows - 1 && si < route->count - 1 && remaining > stop_rows) {
+                dm_text(ctx, DM_MARGIN_X, y, "...", content_w, DM_ROW_DOT, amber);
+                // Show final destination on the same row, right side
+                char sfinal[MAX_STOP_NAME];
+                dm_sanitize(route->stops[route->count - 1], sfinal, sizeof(sfinal));
+                int fw = dm_text_width(sfinal, DM_ROW_DOT);
+                dm_text(ctx, w - DM_MARGIN_X - fw, y, sfinal, content_w,
+                        DM_ROW_DOT, amber);
+            } else {
+                char sstop[MAX_STOP_NAME];
+                dm_sanitize(route->stops[si], sstop, sizeof(sstop));
+                dm_text(ctx, DM_MARGIN_X, y, sstop, content_w, DM_ROW_DOT, amber);
+            }
+            y += rh;
+        }
+
+        // Scroll indicators for route
+        if (offset > 0) {
+            int ax = w - DM_MARGIN_X - 6;
+            int ay = bounds.size.h / 2 - 4;
+            graphics_context_set_fill_color(ctx, amber);
+            graphics_fill_rect(ctx, GRect(ax + 1, ay, 4, 1), 0, GCornerNone);
+            graphics_fill_rect(ctx, GRect(ax + 2, ay - 1, 2, 1), 0, GCornerNone);
+        }
+        if (offset + stop_rows < route->count) {
+            int ax = w - DM_MARGIN_X - 6;
+            int ay = bounds.size.h - DM_MARGIN_Y;
+            graphics_context_set_fill_color(ctx, amber);
+            graphics_fill_rect(ctx, GRect(ax + 1, ay - 2, 4, 1), 0, GCornerNone);
+            graphics_fill_rect(ctx, GRect(ax + 2, ay - 1, 2, 1), 0, GCornerNone);
+        }
+    }
 }
 
 void transit_ui_draw_status(GContext *ctx, GRect bounds, const char *message) {

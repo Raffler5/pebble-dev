@@ -20,7 +20,9 @@
     "KEY_CFG_MAX_DISTANCE": 5,
     "KEY_CFG_COLOR": 6,
     "KEY_CFG_BG_COLOR": 7,
-    "KEY_CFG_FONT": 8
+    "KEY_CFG_FONT": 8,
+    "KEY_ROUTE_REQUEST": 9,
+    "KEY_ROUTE_DATA": 10
   },
   "resources": {
     "media": []

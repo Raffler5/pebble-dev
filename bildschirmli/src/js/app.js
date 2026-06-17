@@ -411,16 +411,14 @@ function findGPSStations(maxDist, callback) {
 
 // ── Fetch departures ─────────────────────────────────────────
 
+// Cache last stationboard response for route detail requests
+var s_lastStationboard = null;
+
 function fetchDepartures(stationId) {
+    // Fetch without field filtering — we need category, delay, and passList
+    // for the detail view. Response is larger but only fetched on station select.
     var url = 'http://transport.opendata.ch/v1/stationboard?id=' + stationId +
-              '&limit=' + MAX_DEPARTURES +
-              '&fields[]=station/name' +
-              '&fields[]=stationboard/to' +
-              '&fields[]=stationboard/number' +
-              '&fields[]=stationboard/stop/departureTimestamp' +
-              '&fields[]=stationboard/stop/prognosis/departureTimestamp' +
-              '&fields[]=stationboard/stop/platform' +
-              '&fields[]=stationboard/stop/prognosis/platform';
+              '&limit=' + MAX_DEPARTURES;
 
     xhrGet(url, function(err, responseText) {
         if (err) { Pebble.sendAppMessage({ 'KEY_ERROR': 'API: ' + err }); return; }
@@ -432,6 +430,8 @@ function fetchDepartures(stationId) {
             Pebble.sendAppMessage({ 'KEY_ERROR': 'Bad response' }); return;
         }
 
+        s_lastStationboard = json;  // cache for route requests
+
         var stationName = json.station.name || '?';
         var parts = splitStationName(stationName);
         var headerName = parts.stop || parts.city;
@@ -441,17 +441,18 @@ function fetchDepartures(stationId) {
         var count = Math.min(json.stationboard.length, MAX_DEPARTURES);
         for (var i = 0; i < count; i++) {
             var entry = json.stationboard[i];
-            var line = entry.number || '?';
+            var cat = entry.category || '';
+            var num = entry.number || '?';
+            var line = cat + num;
             var dir = sanitizeDirection(stationName, entry.to);
             dir = dir.replace(/Bahnhof/g, 'Bhf').replace(/Strasse/g, 'Str').replace(/strasse/g, 'str');
+            // ETA: scheduled time + delay = real departure
             var depTime = 0;
-            if (entry.stop) {
-                if (entry.stop.prognosis && entry.stop.prognosis.departureTimestamp)
-                    depTime = entry.stop.prognosis.departureTimestamp;
-                else if (entry.stop.departureTimestamp)
-                    depTime = entry.stop.departureTimestamp;
-            }
-            var minutes = depTime > 0 ? Math.max(0, Math.floor((depTime - now) / 60)) : 99;
+            if (entry.stop && entry.stop.departureTimestamp)
+                depTime = entry.stop.departureTimestamp;
+            var delay = (entry.stop && entry.stop.delay) ? entry.stop.delay : 0;
+            var realDep = depTime + delay * 60;
+            var minutes = realDep > 0 ? Math.max(0, Math.floor((realDep - now) / 60)) : 99;
             // Platform: prefer realtime (track change), fall back to scheduled
             var platform = '';
             if (entry.stop) {
@@ -467,6 +468,30 @@ function fetchDepartures(stationId) {
     });
 }
 
+function sendRouteStops(depIndex) {
+    if (!s_lastStationboard || !s_lastStationboard.stationboard) {
+        Pebble.sendAppMessage({ 'KEY_ROUTE_DATA': '%' });
+        return;
+    }
+    var entry = s_lastStationboard.stationboard[depIndex];
+    if (!entry || !entry.passList || entry.passList.length === 0) {
+        Pebble.sendAppMessage({ 'KEY_ROUTE_DATA': '%' });
+        return;
+    }
+    // Send stop names separated by semicolons, terminated with %
+    var result = '';
+    for (var i = 0; i < entry.passList.length; i++) {
+        var stop = entry.passList[i];
+        var name = (stop.station && stop.station.name) ? stop.station.name : '';
+        if (!name) continue;
+        var sp = splitStationName(name);
+        var short_name = sp.stop || sp.city;
+        result += short_name + ';';
+    }
+    result += '%';
+    Pebble.sendAppMessage({ 'KEY_ROUTE_DATA': result });
+}
+
 // ── Event handlers ───────────────────────────────────────────
 
 Pebble.addEventListener('ready', function(e) {
@@ -477,6 +502,7 @@ Pebble.addEventListener('ready', function(e) {
 Pebble.addEventListener('appmessage', function(e) {
     if (e.payload.KEY_FETCH) fetchDepartures('' + e.payload.KEY_FETCH);
     if (e.payload.KEY_STATION) findStations();
+    if (e.payload.KEY_ROUTE_REQUEST !== undefined) sendRouteStops(e.payload.KEY_ROUTE_REQUEST);
 });
 
 Pebble.addEventListener('showConfiguration', function(e) {

@@ -37,6 +37,18 @@ void transit_ui_draw_status(GContext *ctx, GRect bounds, const char *message);
 // How many departure rows fit on screen
 int transit_ui_visible_rows(GRect bounds);
 
+// Route stops for detail view (loaded on demand)
+#define MAX_ROUTE_STOPS 24
+#define MAX_STOP_NAME   24
+
+typedef struct {
+    char stops[MAX_ROUTE_STOPS][MAX_STOP_NAME];
+    int count;
+    int scroll_offset;
+    bool valid;
+    bool loading;
+} RouteData;
+
 // Draw the detail view for a single departure
 void transit_ui_draw_detail(GContext *ctx, GRect bounds, const TransitData *data,
-                            int dep_index);
+                            int dep_index, const RouteData *route);

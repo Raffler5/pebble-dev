@@ -27,6 +27,8 @@
 #define KEY_CFG_COLOR           6
 #define KEY_CFG_BG_COLOR        7
 #define KEY_CFG_FONT            8
+#define KEY_ROUTE_REQUEST       9
+#define KEY_ROUTE_DATA         10
 
 #define REFRESH_INTERVAL_S 60
 #define SETTINGS_PKEY      1    // persist storage key
@@ -47,6 +49,7 @@ static AppStatus s_status = STATUS_CONNECTING;
 static char s_error_msg[32];
 static StationListData s_stations;
 static TransitData s_transit;
+static RouteData s_route;
 static char s_time_buf[8];
 
 // ── User settings (persisted on watch) ───────────────────────
@@ -252,7 +255,41 @@ static void parse_departures(const char *raw) {
     s_transit.valid = (s_transit.count > 0);
 }
 
+static void parse_route(const char *raw) {
+    memset(&s_route, 0, sizeof(s_route));
+    if (!raw || !raw[0] || raw[0] == '%') {
+        s_route.valid = true;  // valid but empty
+        return;
+    }
+    const char *p = raw;
+    while (*p && *p != '%' && s_route.count < MAX_ROUTE_STOPS) {
+        const char *semi = strchr(p, ';');
+        if (!semi) break;
+        size_t len = semi - p;
+        if (len >= MAX_STOP_NAME) len = MAX_STOP_NAME - 1;
+        if (len > 0) {
+            memcpy(s_route.stops[s_route.count], p, len);
+            s_route.stops[s_route.count][len] = '\0';
+            s_route.count++;
+        }
+        p = semi + 1;
+    }
+    s_route.scroll_offset = 0;
+    s_route.valid = true;
+    s_route.loading = false;
+}
+
 // ── Phone communication ──────────────────────────────────────
+
+static void request_route(int dep_index) {
+    DictionaryIterator *out;
+    if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
+    dict_write_int32(out, KEY_ROUTE_REQUEST, dep_index);
+    dict_write_end(out);
+    app_message_outbox_send();
+    s_route.loading = true;
+    s_route.valid = false;
+}
 
 static void request_departures(const char *station_id) {
     DictionaryIterator *out;
@@ -319,6 +356,14 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
         return;
     }
 
+    // ── Route data ──
+    t = dict_find(iter, KEY_ROUTE_DATA);
+    if (t) {
+        parse_route(t->value->cstring);
+        mark_detail_dirty();
+        return;
+    }
+
     // ── Error ──
     t = dict_find(iter, KEY_ERROR);
     if (t) {
@@ -343,15 +388,42 @@ static void outbox_failed_handler(DictionaryIterator *iter,
 static void detail_update_proc(Layer *layer, GContext *ctx) {
     GRect bounds = layer_get_bounds(layer);
     if (s_transit.valid && s_transit.selected < s_transit.count) {
-        transit_ui_draw_detail(ctx, bounds, &s_transit, s_transit.selected);
+        transit_ui_draw_detail(ctx, bounds, &s_transit, s_transit.selected, &s_route);
     } else {
         transit_ui_draw_status(ctx, bounds, "NO DATA");
     }
 }
 
+static void detail_up_handler(ClickRecognizerRef ref, void *ctx) {
+    if (s_route.valid && s_route.scroll_offset > 0) {
+        s_route.scroll_offset--;
+        mark_detail_dirty();
+    }
+}
+
+static void detail_down_handler(ClickRecognizerRef ref, void *ctx) {
+    if (s_route.valid && s_route.count > 0) {
+        s_route.scroll_offset++;
+        // Clamp will be handled by draw (stops drawing when out of stops)
+        if (s_route.scroll_offset >= s_route.count)
+            s_route.scroll_offset = s_route.count - 1;
+        mark_detail_dirty();
+    }
+}
+
+static void detail_click_config(void *context) {
+    window_single_click_subscribe(BUTTON_ID_UP, detail_up_handler);
+    window_single_click_subscribe(BUTTON_ID_DOWN, detail_down_handler);
+    // BACK: SDK default pops to departure list
+}
+
 static void detail_window_load(Window *window) {
     Layer *root = window_get_root_layer(window);
     layer_set_update_proc(root, detail_update_proc);
+    // Request route stops from phone
+    memset(&s_route, 0, sizeof(s_route));
+    s_route.loading = true;
+    request_route(s_transit.selected);
 }
 
 static void detail_window_unload(Window *window) {
@@ -566,6 +638,7 @@ static void init(void) {
 
     s_detail_window = window_create();
     window_set_background_color(s_detail_window, GColorBlack);
+    window_set_click_config_provider(s_detail_window, detail_click_config);
     window_set_window_handlers(s_detail_window, (WindowHandlers) {
         .load = detail_window_load,
         .unload = detail_window_unload,
@@ -578,7 +651,7 @@ static void init(void) {
     app_message_register_inbox_received(inbox_received_handler);
     app_message_register_inbox_dropped(inbox_dropped_handler);
     app_message_register_outbox_failed(outbox_failed_handler);
-    app_message_open(2048, 256);
+    app_message_open(2048, 512);
 
     tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
 }
