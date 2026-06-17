@@ -148,31 +148,27 @@ void transit_ui_draw_detail(GContext *ctx, GRect bounds, const TransitData *data
     int y = DM_MARGIN_Y;
     int rh = dm_text_height(DM_ROW_DOT) + DM_ROW_GAP + 2;
 
-    // Header: line (large)
+    // Header row: line (large) + direction + ETA (row size, vertically centered)
     char sline[MAX_LINE_LEN];
     dm_sanitize(dep->line, sline, sizeof(sline));
-    dm_text(ctx, DM_MARGIN_X, y, sline, content_w, DM_HEADER_DOT, amber);
-    y += dm_text_height(DM_HEADER_DOT) + DM_ROW_GAP;
-
-    // Separator
-    graphics_context_set_stroke_color(ctx, amber);
-    graphics_draw_line(ctx, GPoint(DM_MARGIN_X, y), GPoint(w - DM_MARGIN_X - 1, y));
-    y += DM_ROW_GAP + 2;
-
-    // Row 1: direction + ETA right-aligned
-    char sdir[MAX_DIR_LEN];
-    dm_sanitize(dep->direction, sdir, sizeof(sdir));
-
+    int header_h = dm_text_height(DM_HEADER_DOT);
+    int row_text_h = dm_text_height(DM_ROW_DOT);
     int row_char_w = dm_char_width(DM_ROW_DOT);
-    int eta_col_w = 4 * row_char_w;  // enough for "99'" or bus icon
-    int dir_col_w = content_w - eta_col_w;
 
-    dm_text(ctx, DM_MARGIN_X, y, sdir, dir_col_w, DM_ROW_DOT, amber);
+    // Draw line number at header size
+    int line_w = dm_text_width(sline, DM_HEADER_DOT);
+    dm_text(ctx, DM_MARGIN_X, y, sline, content_w, DM_HEADER_DOT, amber);
 
+    // Direction + ETA at row size, vertically centered in header height
+    int dir_x = DM_MARGIN_X + line_w + dm_char_width(DM_HEADER_DOT);
+    int dir_y = y + (header_h - row_text_h) / 2;
+
+    // ETA right-aligned
+    int eta_col_w = 4 * row_char_w;
     if (strcmp(dep->eta, "0") == 0) {
         int pitch = DM_ROW_DOT + 1;
         int icon_w = 8 * pitch;
-        dm_bus_icon(ctx, w - DM_MARGIN_X - icon_w, y, DM_ROW_DOT, amber);
+        dm_bus_icon(ctx, w - DM_MARGIN_X - icon_w, dir_y, DM_ROW_DOT, amber);
     } else {
         char seta[MAX_ETA_LEN + 2];
         dm_sanitize(dep->eta, seta, sizeof(seta) - 2);
@@ -182,10 +178,22 @@ void transit_ui_draw_detail(GContext *ctx, GRect bounds, const TransitData *data
             seta[len + 1] = '\0';
         }
         int eta_w = dm_text_width(seta, DM_ROW_DOT);
-        dm_text(ctx, w - DM_MARGIN_X - eta_w, y, seta, eta_col_w,
+        dm_text(ctx, w - DM_MARGIN_X - eta_w, dir_y, seta, eta_col_w,
                 DM_ROW_DOT, amber);
     }
-    y += rh;
+
+    // Direction between line and ETA
+    int dir_col_w = (w - DM_MARGIN_X - eta_col_w) - dir_x;
+    char sdir[MAX_DIR_LEN];
+    dm_sanitize(dep->direction, sdir, sizeof(sdir));
+    dm_text(ctx, dir_x, dir_y, sdir, dir_col_w, DM_ROW_DOT, amber);
+
+    y += header_h + DM_ROW_GAP;
+
+    // Separator
+    graphics_context_set_stroke_color(ctx, amber);
+    graphics_draw_line(ctx, GPoint(DM_MARGIN_X, y), GPoint(w - DM_MARGIN_X - 1, y));
+    y += DM_ROW_GAP + 2;
 
     // Row 2: platform (if available)
     if (dep->platform[0]) {
