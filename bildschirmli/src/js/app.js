@@ -35,7 +35,12 @@ function saveSettings(s) {
 
 function openConfigPage() {
     var settings = loadSettings();
-    var favsJSON = JSON.stringify(settings.favorites || []);
+    // Escape non-ASCII to \uXXXX so the HTML is pure ASCII —
+    // Pebble's webview ignores charset on data URIs
+    var favsJSON = JSON.stringify(settings.favorites || []).replace(
+        /[\u0080-\uffff]/g, function(c) {
+            return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
+        });
 
     var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">' +
         '<style>' +
