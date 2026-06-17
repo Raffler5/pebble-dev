@@ -204,25 +204,34 @@ Pebble.sendAppMessage(colorMsg, function() {
 
 ---
 
-## 9. Data URI Config Page — Missing charset=utf-8
+## 9. Data URI Config Page — Non-ASCII Garbled in Favorites
 
-**Symptom:** Station names with umlauts (ü, ö, ä, é) look garbled in the favorites list when reopening the config page. But search results (loaded dynamically via XHR) display correctly.
+**Symptom:** Station names with umlauts (ü, ö, ä, é) look garbled in the favorites list when reopening the config page (e.g. "ZÃ¼rich" instead of "Zürich"). But search results (loaded dynamically via XHR) display correctly.
 
-**Root cause:** The settings page is served as a `data:text/html,...` URI. Without an explicit charset declaration, the phone's browser may default to Latin-1 when parsing the initial HTML. Station names with UTF-8 multi-byte characters (baked into the HTML as `var favs=[...]`) get misinterpreted.
+**Root cause:** The settings page is served as a `data:text/html,...` URI. Favorites are baked into the HTML as `var favs=[{"name":"Zürich..."}]`. The Pebble phone app's webview ignores `charset=utf-8` on data URIs, interpreting the UTF-8 bytes as Latin-1.
 
 Dynamically loaded content (XHR → JSON.parse → innerHTML) is unaffected because JavaScript handles Unicode internally — the encoding issue only hits the static HTML source.
 
-**Fix:** Declare charset in both the data URI and the HTML meta tag:
-```javascript
-// WRONG
-Pebble.openURL('data:text/html,' + encodeURIComponent(html));
+**Things that do NOT fix it:**
+- `<meta charset="utf-8">` — ignored by Pebble's webview on data URIs
+- `data:text/html;charset=utf-8,...` — also ignored
 
-// RIGHT
-var html = '<!DOCTYPE html><html><head><meta charset="utf-8">...';
-Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+**Fix:** Escape all non-ASCII characters to `\uXXXX` JS escape sequences before embedding in the HTML. This makes the HTML pure ASCII — charset doesn't matter.
+
+```javascript
+// WRONG — relies on charset (ignored by Pebble webview)
+var favsJSON = JSON.stringify(settings.favorites);
+
+// RIGHT — pure ASCII, works everywhere
+var favsJSON = JSON.stringify(settings.favorites).replace(
+    /[\u0080-\uffff]/g, function(c) {
+        return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
+    });
 ```
 
-**Rule:** Always add `charset=utf-8` to data URIs containing non-ASCII text, and include `<meta charset="utf-8">` in the HTML head.
+The JS parser inside the webview correctly interprets `\u00fc` as `ü` regardless of the page's character encoding.
+
+**Rule:** Never embed raw non-ASCII text in data URI HTML templates. Always escape to `\uXXXX` for any text that might contain Unicode (station names, user input, API responses).
 
 ---
 

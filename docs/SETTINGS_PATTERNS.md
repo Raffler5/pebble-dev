@@ -42,14 +42,19 @@ The `"configurable"` capability makes the gear icon appear next to the app in th
 
 ### 2. Build the HTML page in JS
 
-**Important:** Always declare `charset=utf-8` in both the HTML meta tag and the data URI. Without this, non-ASCII characters (umlauts, accents) embedded in the HTML template will display as garbled text. See COMMON_PITFALLS.md §9 for details.
+**Important:** Pebble's phone webview ignores `charset=utf-8` on data URIs. Any non-ASCII text (umlauts, accents) embedded in the HTML template **must** be escaped to `\uXXXX` JS sequences. See COMMON_PITFALLS.md §9 for the full story.
 
 ```javascript
 function openConfigPage() {
     var settings = loadSettings();
 
+    // Escape non-ASCII to \uXXXX so HTML stays pure ASCII
+    var dataJSON = JSON.stringify(settings.data).replace(
+        /[\u0080-\uffff]/g, function(c) {
+            return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
+        });
+
     var html = '<!DOCTYPE html><html><head>' +
-        '<meta charset="utf-8">' +      // ← required for non-ASCII
         '<meta name="viewport" content="width=device-width">' +
         '<style>/* your CSS */</style>' +
         '</head><body>' +
@@ -62,8 +67,7 @@ function openConfigPage() {
         '}' +
         '</script></body></html>';
 
-    // charset=utf-8 in the data URI too
-    Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    Pebble.openURL('data:text/html,' + encodeURIComponent(html));
 }
 ```
 

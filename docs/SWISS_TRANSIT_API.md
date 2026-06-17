@@ -92,48 +92,84 @@ GET /v1/stationboard?id=8503000&limit=12
     &fields[]=station/name
     &fields[]=stationboard/to
     &fields[]=stationboard/number
+    &fields[]=stationboard/category
     &fields[]=stationboard/stop/departureTimestamp
-    &fields[]=stationboard/stop/prognosis/departureTimestamp
+    &fields[]=stationboard/stop/delay
+    &fields[]=stationboard/stop/platform
+    &fields[]=stationboard/stop/prognosis/platform
 ```
 
 **On ESP8266 (80KB RAM):** Field filtering is mandatory — 50KB response would crash.
-**On Pebble PKJS:** Field filtering is recommended — faster parsing, less phone battery.
+**On Pebble PKJS:** Field filtering is optional. Bildschirmli fetches without filtering because the detail view needs `passList` (route stops), which can't be efficiently filtered. The phone handles the 50KB fine.
 
-### Response (Filtered)
+### Key Fields
 
-```json
-{
-  "station": { "name": "Zürich HB" },
-  "stationboard": [
-    {
-      "number": "S2",
-      "to": "Ziegelbrücke",
-      "stop": {
-        "departureTimestamp": 1718535600,
-        "prognosis": {
-          "departureTimestamp": 1718535660
-        }
-      }
-    }
-  ]
-}
-```
+| Field | Type | Example | Notes |
+|-------|------|---------|-------|
+| `number` | string | `"2"`, `"36"` | Line number only (no category) |
+| `category` | string | `"S"`, `"IR"`, `"IC"`, `"T"`, `"B"` | Transport type. Concatenate with number for display: "S2", "IR36" |
+| `to` | string | `"Ziegelbrücke"` | Destination name |
+| `stop.departureTimestamp` | int | `1718535600` | Scheduled departure (Unix timestamp) |
+| `stop.delay` | int | `0`, `2`, `5` | Delay in minutes. Pre-computed by the API. |
+| `stop.platform` | string | `"3"`, `"2A-D"`, `""` | Platform/track. Always set for trains/buses, empty for trams. |
+| `stop.prognosis.platform` | string/null | `null` | Realtime platform (track change). Almost always null. |
+| `passList` | array | (see below) | All intermediate stops with times |
+| `operator` | string | `"SBB"` | Operator name. Messy formatting. Low value. |
+| `capacity1st`/`capacity2nd` | null | — | Documented but never populated |
 
-### Departure Time
+### GOTCHA: `prognosis.departureTimestamp` Does Not Exist
 
-Prefer realtime prognosis, fall back to scheduled:
+The API response does **not** contain `stop.prognosis.departureTimestamp`. It returns:
+- `stop.prognosis.departure` — ISO 8601 string (e.g. `"2026-06-17T16:50:00+0200"`)
+- `stop.delay` — integer minutes
+
+If you request `fields[]=stationboard/stop/prognosis/departureTimestamp`, you get nothing back silently.
+
+### Departure Time (Correct Approach)
+
+Use scheduled timestamp + delay for the real ETA:
 
 ```javascript
-var depTime = 0;
-if (entry.stop.prognosis && entry.stop.prognosis.departureTimestamp) {
-    depTime = entry.stop.prognosis.departureTimestamp;  // realtime
-} else if (entry.stop.departureTimestamp) {
-    depTime = entry.stop.departureTimestamp;  // scheduled
-}
-var minutes = Math.max(0, Math.floor((depTime - now) / 60));
+var depTime = entry.stop.departureTimestamp || 0;
+var delay = entry.stop.delay || 0;
+var realDep = depTime + delay * 60;
+var minutes = Math.max(0, Math.floor((realDep - now) / 60));
 ```
 
-`prognosis.departureTimestamp` is null when no realtime data is available (e.g. late evening, rural routes).
+Do NOT try to use `prognosis.departureTimestamp` — it doesn't exist in the response.
+
+### Platform Data
+
+```
+&fields[]=stationboard/stop/platform
+&fields[]=stationboard/stop/prognosis/platform
+```
+
+- **Trains (S, IC, IR, RE):** Always populated (`"3"`, `"2A-D"`, `"41/42"`)
+- **Buses (B):** Usually populated with bay letters (`"A"`, `"E"`)
+- **Trams (T):** Empty string at tram-only stops, may have letter at mixed stops
+- **Prognosis platform:** Almost always `null`. Only set during active Gleisänderung (track change).
+
+Display logic: show `prognosis.platform` if non-null, else `stop.platform`. Hide if empty.
+
+### passList (Route Stops)
+
+Each stationboard entry includes a `passList` array with all intermediate stops:
+
+```json
+"passList": [
+  {
+    "station": { "id": "8503003", "name": "Zürich Hardbrücke" },
+    "arrivalTimestamp": 1718535780,
+    "departureTimestamp": 1718535840,
+    "delay": 0,
+    "platform": "5"
+  },
+  ...
+]
+```
+
+**Warning:** Each entry is ~300 bytes. A train with 15 stops = ~4.5KB per departure. On memory-constrained platforms, fetch on demand rather than upfront. Bildschirmli Pebble caches the full response on the phone, then sends just the stop names for one departure when the detail view opens.
 
 ---
 
