@@ -36,6 +36,9 @@ extern const uint8_t DM_BUS_ICON[DM_BUS_ROWS];
 extern uint8_t dm_color_argb8;
 extern uint8_t dm_bg_color_argb8;
 
+// Font style: 0 = classic (dot-matrix), 1 = solid (filled)
+extern uint8_t dm_font_solid;
+
 // Convenience macros
 #define DM_COLOR_CURRENT() ((GColor){ .argb = dm_color_argb8 })
 #define DM_BG_CURRENT()    ((GColor){ .argb = dm_bg_color_argb8 })

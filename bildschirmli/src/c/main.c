@@ -26,6 +26,7 @@
 #define KEY_CFG_MAX_DISTANCE    5
 #define KEY_CFG_COLOR           6
 #define KEY_CFG_BG_COLOR        7
+#define KEY_CFG_FONT            8
 
 #define REFRESH_INTERVAL_S 60
 #define SETTINGS_PKEY      1    // persist storage key
@@ -55,6 +56,7 @@ typedef struct {
     int  max_distance_m;
     uint8_t color_argb8;
     uint8_t bg_color_argb8;
+    uint8_t font_solid;
 } UserSettings;
 
 static UserSettings s_settings;
@@ -76,6 +78,7 @@ static void settings_load(void) {
     }
     dm_color_argb8 = s_settings.color_argb8;
     dm_bg_color_argb8 = s_settings.bg_color_argb8;
+    dm_font_solid = s_settings.font_solid ? 1 : 0;
 }
 
 static void settings_save(void) {
@@ -244,7 +247,8 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
     Tuple *cfg_dist = dict_find(iter, KEY_CFG_MAX_DISTANCE);
     Tuple *cfg_color = dict_find(iter, KEY_CFG_COLOR);
     Tuple *cfg_bg = dict_find(iter, KEY_CFG_BG_COLOR);
-    if (cfg_station || cfg_dist || cfg_color || cfg_bg) {
+    Tuple *cfg_font = dict_find(iter, KEY_CFG_FONT);
+    if (cfg_station || cfg_dist || cfg_color || cfg_bg || cfg_font) {
         if (cfg_station) {
             snprintf(s_settings.default_station, sizeof(s_settings.default_station),
                      "%s", cfg_station->value->cstring);
@@ -259,6 +263,10 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
         if (cfg_bg) {
             s_settings.bg_color_argb8 = (uint8_t)cfg_bg->value->int32;
             dm_bg_color_argb8 = s_settings.bg_color_argb8;
+        }
+        if (cfg_font) {
+            s_settings.font_solid = (uint8_t)cfg_font->value->int32;
+            dm_font_solid = s_settings.font_solid ? 1 : 0;
         }
         settings_save();
         // Redraw with new color

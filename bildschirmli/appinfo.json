@@ -19,7 +19,8 @@
     "KEY_CFG_DEFAULT_STATION": 4,
     "KEY_CFG_MAX_DISTANCE": 5,
     "KEY_CFG_COLOR": 6,
-    "KEY_CFG_BG_COLOR": 7
+    "KEY_CFG_BG_COLOR": 7,
+    "KEY_CFG_FONT": 8
   },
   "resources": {
     "media": []

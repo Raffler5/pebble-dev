@@ -5,6 +5,7 @@
 // Runtime colors — defaults overridden by settings
 uint8_t dm_color_argb8 = DM_COLOR_DEFAULT;
 uint8_t dm_bg_color_argb8 = DM_BG_COLOR_DEFAULT;
+uint8_t dm_font_solid = 0;
 
 // 5x7 dot-matrix font — ported from Bildschirmli SmallTV-Ultra.
 // Each row is a 5-bit bitmask (MSB = leftmost column).
@@ -97,6 +98,7 @@ int dm_char(GContext *ctx, int x, int y, char c, uint8_t dot_size) {
     if (empty && c != ' ') glyph = DM_FONT_5X7[' '];
 
     int pitch = dot_size + 1;
+    int fill = dm_font_solid ? pitch : dot_size;
     // Caller must set fill color before calling dm_char/dm_text
 
     for (int row = 0; row < 7; row++) {
@@ -104,7 +106,7 @@ int dm_char(GContext *ctx, int x, int y, char c, uint8_t dot_size) {
         for (int col = 0; col < 5; col++) {
             if (bits & (0x10 >> col)) {
                 graphics_fill_rect(ctx,
-                    GRect(x + col * pitch, y + row * pitch, dot_size, dot_size),
+                    GRect(x + col * pitch, y + row * pitch, fill, fill),
                     0, GCornerNone);
             }
         }
@@ -146,12 +148,13 @@ void dm_bus_icon(GContext *ctx, int x, int y, uint8_t dot_size, GColor color) {
     int pitch = dot_size + 1;
     graphics_context_set_fill_color(ctx, color);
 
+    int fill = dm_font_solid ? pitch : dot_size;
     for (int row = 0; row < DM_BUS_ROWS; row++) {
         uint8_t bits = DM_BUS_ICON[row];
         for (int col = 0; col < 8; col++) {
             if (bits & (0x80 >> col)) {
                 graphics_fill_rect(ctx,
-                    GRect(x + col * pitch, y + row * pitch, dot_size, dot_size),
+                    GRect(x + col * pitch, y + row * pitch, fill, fill),
                     0, GCornerNone);
             }
         }

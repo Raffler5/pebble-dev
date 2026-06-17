@@ -24,7 +24,7 @@ function loadSettings() {
             return s;
         } catch(e) {}
     }
-    return { favorites: [], maxDistance: DEFAULT_MAX_DISTANCE, colorArgb8: 248, bgColorArgb8: 192 };
+    return { favorites: [], maxDistance: DEFAULT_MAX_DISTANCE, colorArgb8: 248, bgColorArgb8: 192, fontSolid: 0 };
 }
 
 function saveSettings(s) {
@@ -100,6 +100,16 @@ function openConfigPage() {
         '<p style="margin:8px 0 4px;color:#ffaa00;font-size:12px">BACKGROUND</p>' +
         '<div id="bgcolors" style="display:flex;flex-wrap:wrap;gap:3px;margin:0 0 8px"></div>' +
 
+        // Font style
+        '<h2>Font Style</h2>' +
+        '<div style="display:flex;gap:8px;margin:8px 0">' +
+        '<button id="font0" onclick="pickFont(0)" style="flex:1;padding:10px;border-radius:4px;' +
+        'font-size:14px;font-weight:bold;cursor:pointer;border:2px solid #555">Classic</button>' +
+        '<button id="font1" onclick="pickFont(1)" style="flex:1;padding:10px;border-radius:4px;' +
+        'font-size:14px;font-weight:bold;cursor:pointer;border:2px solid #555">Solid</button>' +
+        '</div>' +
+        '<p class="desc">Classic: dot-matrix look (individual dots). Solid: filled characters (bolder).</p>' +
+
         // Max distance
         '<h2>Nearby Search Radius</h2>' +
         '<p>Max distance: <span class="val" id="distval">' + settings.maxDistance + 'm</span></p>' +
@@ -116,6 +126,7 @@ function openConfigPage() {
         'var searchResults=[];' +
         'var selFg=' + (settings.colorArgb8 || 248) + ';' +
         'var selBg=' + (settings.bgColorArgb8 || 192) + ';' +
+        'var selFont=' + (settings.fontSolid || 0) + ';' +
 
         // Generate full 64-color Pebble palette
         'var ch=["00","55","AA","FF"];' +
@@ -148,6 +159,16 @@ function openConfigPage() {
 
         'function pickFg(a){selFg=a;renderPalette("fgcolors",selFg,"pickFg");updatePreview();}' +
         'function pickBg(a){selBg=a;renderPalette("bgcolors",selBg,"pickBg");updatePreview();}' +
+
+        'function renderFont(){' +
+        'var b0=document.getElementById("font0"),b1=document.getElementById("font1");' +
+        'b0.style.background=selFont===0?"#ffaa00":"#2a2a2a";' +
+        'b0.style.color=selFont===0?"#1a1a1a":"#e0e0e0";' +
+        'b0.style.borderColor=selFont===0?"#ffaa00":"#555";' +
+        'b1.style.background=selFont===1?"#ffaa00":"#2a2a2a";' +
+        'b1.style.color=selFont===1?"#1a1a1a":"#e0e0e0";' +
+        'b1.style.borderColor=selFont===1?"#ffaa00":"#555";}' +
+        'function pickFont(v){selFont=v;renderFont();}' +
 
         'function rmFav(i){favs.splice(i,1);renderFavs();}' +
 
@@ -195,7 +216,8 @@ function openConfigPage() {
         'favorites:favs,' +
         'maxDistance:parseInt(document.getElementById("distance").value),' +
         'colorArgb8:selFg,' +
-        'bgColorArgb8:selBg' +
+        'bgColorArgb8:selBg,' +
+        'fontSolid:selFont' +
         '});' +
         'document.location.href="pebblejs://close#"+encodeURIComponent(s);}' +
 
@@ -203,6 +225,7 @@ function openConfigPage() {
         'renderPalette("fgcolors",selFg,"pickFg");' +
         'renderPalette("bgcolors",selBg,"pickBg");' +
         'updatePreview();' +
+        'renderFont();' +
         '</script></body></html>';
 
     Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
@@ -464,7 +487,8 @@ Pebble.addEventListener('webviewclosed', function(e) {
         var msg = {};
         if (settings.colorArgb8) msg['KEY_CFG_COLOR'] = settings.colorArgb8;
         if (settings.bgColorArgb8) msg['KEY_CFG_BG_COLOR'] = settings.bgColorArgb8;
-        if (msg['KEY_CFG_COLOR'] || msg['KEY_CFG_BG_COLOR']) {
+        msg['KEY_CFG_FONT'] = settings.fontSolid || 0;
+        if (Object.keys(msg).length > 0) {
             Pebble.sendAppMessage(msg, function() {
                 findStations();
             }, function() {
