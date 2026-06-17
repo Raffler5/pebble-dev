@@ -88,6 +88,7 @@ static void settings_save(void) {
 // Windows — created at init, destroyed at deinit
 static Window *s_picker_window;
 static Window *s_deps_window;
+static Window *s_detail_window;
 
 // No child layers — update_proc set on root layer directly
 static AppTimer *s_refresh_timer;
@@ -122,6 +123,12 @@ static void mark_picker_dirty(void) {
 static void mark_deps_dirty(void) {
     if (s_deps_window) {
         layer_mark_dirty(window_get_root_layer(s_deps_window));
+    }
+}
+
+static void mark_detail_dirty(void) {
+    if (s_detail_window) {
+        layer_mark_dirty(window_get_root_layer(s_detail_window));
     }
 }
 
@@ -214,16 +221,34 @@ static void parse_departures(const char *raw) {
         memcpy(dep->direction, p, len); dep->direction[len] = '\0';
         p = colon + 1;
 
-        semi = strchr(p, ';');
-        if (!semi) break;
-        len = semi - p;
-        if (len >= MAX_ETA_LEN) len = MAX_ETA_LEN - 1;
-        memcpy(dep->eta, p, len); dep->eta[len] = '\0';
-        p = semi + 1;
+        colon = strchr(p, ':');
+        if (colon) {
+            len = colon - p;
+            if (len >= MAX_ETA_LEN) len = MAX_ETA_LEN - 1;
+            memcpy(dep->eta, p, len); dep->eta[len] = '\0';
+            p = colon + 1;
+
+            semi = strchr(p, ';');
+            if (!semi) break;
+            len = semi - p;
+            if (len >= MAX_PLATFORM_LEN) len = MAX_PLATFORM_LEN - 1;
+            memcpy(dep->platform, p, len); dep->platform[len] = '\0';
+            p = semi + 1;
+        } else {
+            // Backwards compat: no platform field
+            semi = strchr(p, ';');
+            if (!semi) break;
+            len = semi - p;
+            if (len >= MAX_ETA_LEN) len = MAX_ETA_LEN - 1;
+            memcpy(dep->eta, p, len); dep->eta[len] = '\0';
+            dep->platform[0] = '\0';
+            p = semi + 1;
+        }
 
         s_transit.count++;
     }
     s_transit.scroll_offset = 0;
+    s_transit.selected = 0;
     s_transit.valid = (s_transit.count > 0);
 }
 
@@ -313,6 +338,26 @@ static void outbox_failed_handler(DictionaryIterator *iter,
     APP_LOG(APP_LOG_LEVEL_ERROR, "Outbox failed: %d", (int)reason);
 }
 
+// ── Detail screen ────────────────────────────────────────────
+
+static void detail_update_proc(Layer *layer, GContext *ctx) {
+    GRect bounds = layer_get_bounds(layer);
+    if (s_transit.valid && s_transit.selected < s_transit.count) {
+        transit_ui_draw_detail(ctx, bounds, &s_transit, s_transit.selected);
+    } else {
+        transit_ui_draw_status(ctx, bounds, "NO DATA");
+    }
+}
+
+static void detail_window_load(Window *window) {
+    Layer *root = window_get_root_layer(window);
+    layer_set_update_proc(root, detail_update_proc);
+}
+
+static void detail_window_unload(Window *window) {
+    // No layer to destroy
+}
+
 // ── Departure screen ─────────────────────────────────────────
 
 static void deps_update_proc(Layer *layer, GContext *ctx) {
@@ -325,35 +370,67 @@ static void deps_update_proc(Layer *layer, GContext *ctx) {
 }
 
 static void deps_select_handler(ClickRecognizerRef ref, void *ctx) {
-    if (s_stations.valid && s_stations.selected < s_stations.count) {
-        s_status = STATUS_LOADING_DEPS;
+    if (!s_transit.valid || s_transit.count == 0) return;
+
+    if (!s_transit.selecting) {
+        // First press: activate cursor
+        s_transit.selecting = true;
+        s_transit.selected = s_transit.scroll_offset;  // highlight first visible
         mark_deps_dirty();
-        request_departures(s_stations.stations[s_stations.selected].id);
+    } else {
+        // Second press: open detail
+        window_stack_push(s_detail_window, true);
     }
 }
 
 static void deps_up_handler(ClickRecognizerRef ref, void *ctx) {
-    if (s_transit.scroll_offset > 0) {
-        s_transit.scroll_offset--;
-        mark_deps_dirty();
+    if (s_transit.selecting && s_transit.valid) {
+        if (s_transit.selected > 0) {
+            s_transit.selected--;
+            if (s_transit.selected < s_transit.scroll_offset)
+                s_transit.scroll_offset = s_transit.selected;
+            mark_deps_dirty();
+        }
+    } else {
+        if (s_transit.scroll_offset > 0) {
+            s_transit.scroll_offset--;
+            mark_deps_dirty();
+        }
     }
 }
 
 static void deps_down_handler(ClickRecognizerRef ref, void *ctx) {
     GRect bounds = layer_get_bounds(window_get_root_layer(s_deps_window));
     int visible = transit_ui_visible_rows(bounds);
-    if (s_transit.scroll_offset + visible < s_transit.count) {
-        s_transit.scroll_offset++;
-        mark_deps_dirty();
+
+    if (s_transit.selecting && s_transit.valid) {
+        if (s_transit.selected < s_transit.count - 1) {
+            s_transit.selected++;
+            if (s_transit.selected >= s_transit.scroll_offset + visible)
+                s_transit.scroll_offset = s_transit.selected - visible + 1;
+            mark_deps_dirty();
+        }
+    } else {
+        if (s_transit.scroll_offset + visible < s_transit.count) {
+            s_transit.scroll_offset++;
+            mark_deps_dirty();
+        }
     }
 }
 
 static void deps_tap_handler(AccelAxisType axis, int32_t direction) {
-    deps_select_handler(NULL, NULL);
+    // Shake to refresh
+    if (s_stations.valid && s_stations.selected < s_stations.count) {
+        s_transit.selecting = false;  // reset cursor on refresh
+        s_status = STATUS_LOADING_DEPS;
+        mark_deps_dirty();
+        request_departures(s_stations.stations[s_stations.selected].id);
+    }
 }
 
 static void refresh_timer_handler(void *data) {
     if (s_status == STATUS_DEPS_READY && s_stations.valid) {
+        s_transit.selecting = false;  // reset cursor on auto-refresh
         request_departures(s_stations.stations[s_stations.selected].id);
     }
     s_refresh_timer = app_timer_register(REFRESH_INTERVAL_S * 1000,
@@ -368,7 +445,6 @@ static void deps_click_config(void *context) {
 }
 
 static void deps_window_load(Window *window) {
-    // Set update_proc directly on root layer — no child layer needed
     Layer *root = window_get_root_layer(window);
     layer_set_update_proc(root, deps_update_proc);
 
@@ -377,13 +453,18 @@ static void deps_window_load(Window *window) {
                                           refresh_timer_handler, NULL);
 }
 
+static void deps_window_appear(Window *window) {
+    // Reset selection cursor when returning from detail
+    s_transit.selecting = false;
+    mark_deps_dirty();
+}
+
 static void deps_window_unload(Window *window) {
     accel_tap_service_unsubscribe();
     if (s_refresh_timer) {
         app_timer_cancel(s_refresh_timer);
         s_refresh_timer = NULL;
     }
-    // No layer to destroy — root layer is managed by the window
 }
 
 // ── Station picker screen ────────────────────────────────────
@@ -479,7 +560,15 @@ static void init(void) {
     window_set_click_config_provider(s_deps_window, deps_click_config);
     window_set_window_handlers(s_deps_window, (WindowHandlers) {
         .load = deps_window_load,
+        .appear = deps_window_appear,
         .unload = deps_window_unload,
+    });
+
+    s_detail_window = window_create();
+    window_set_background_color(s_detail_window, GColorBlack);
+    window_set_window_handlers(s_detail_window, (WindowHandlers) {
+        .load = detail_window_load,
+        .unload = detail_window_unload,
     });
 
     // Push only the picker (root)
@@ -496,6 +585,7 @@ static void init(void) {
 
 static void deinit(void) {
     tick_timer_service_unsubscribe();
+    window_destroy(s_detail_window);
     window_destroy(s_deps_window);
     window_destroy(s_picker_window);
 }

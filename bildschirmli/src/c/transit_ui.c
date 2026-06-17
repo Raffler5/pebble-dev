@@ -65,25 +65,37 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
     int count = data->count - offset;
     if (count > visible) count = visible;
 
+    int row_text_h = dm_text_height(DM_ROW_DOT);
+
     for (int i = 0; i < count; i++) {
-        const Departure *dep = &data->departures[offset + i];
+        int idx = offset + i;
+        const Departure *dep = &data->departures[idx];
+        bool selected = data->selecting && (idx == data->selected);
+
+        if (selected) {
+            graphics_context_set_fill_color(ctx, amber);
+            graphics_fill_rect(ctx,
+                GRect(DM_MARGIN_X - 2, y - 1, content_w + 4, row_text_h + 2),
+                0, GCornerNone);
+        }
+
+        GColor text_color = selected ? black : amber;
 
         // Line number
         char sline[MAX_LINE_LEN];
         dm_sanitize(dep->line, sline, sizeof(sline));
-        dm_text(ctx, DM_MARGIN_X, y, sline, line_col_w, DM_ROW_DOT, amber);
+        dm_text(ctx, DM_MARGIN_X, y, sline, line_col_w, DM_ROW_DOT, text_color);
 
         // Direction
         char sdir[MAX_DIR_LEN];
         dm_sanitize(dep->direction, sdir, sizeof(sdir));
-        dm_text(ctx, dir_x, y, sdir, dir_col_w, DM_ROW_DOT, amber);
+        dm_text(ctx, dir_x, y, sdir, dir_col_w, DM_ROW_DOT, text_color);
 
         // ETA — bus icon for 0 min, otherwise right-aligned "N'"
         if (strcmp(dep->eta, "0") == 0) {
-            // 8x9 bus icon at text pitch
             int pitch = DM_ROW_DOT + 1;
             int icon_w = 8 * pitch;
-            dm_bus_icon(ctx, w - DM_MARGIN_X - icon_w, y, DM_ROW_DOT, amber);
+            dm_bus_icon(ctx, w - DM_MARGIN_X - icon_w, y, DM_ROW_DOT, text_color);
         } else {
             char seta[MAX_ETA_LEN + 2];
             dm_sanitize(dep->eta, seta, sizeof(seta) - 2);
@@ -94,7 +106,7 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
             }
             int eta_w = dm_text_width(seta, DM_ROW_DOT);
             dm_text(ctx, w - DM_MARGIN_X - eta_w, y, seta, eta_col_w,
-                    DM_ROW_DOT, amber);
+                    DM_ROW_DOT, text_color);
         }
 
         y += rh;
@@ -115,6 +127,82 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
         graphics_fill_rect(ctx, GRect(ax + 1, ay - 2, 4, 1), 0, GCornerNone);
         graphics_fill_rect(ctx, GRect(ax + 2, ay - 1, 2, 1), 0, GCornerNone);
     }
+}
+
+void transit_ui_draw_detail(GContext *ctx, GRect bounds, const TransitData *data,
+                            int dep_index) {
+    GColor amber = DM_COLOR_CURRENT();
+    GColor black = DM_BG_CURRENT();
+    int w = bounds.size.w;
+    int content_w = w - 2 * DM_MARGIN_X;
+
+    graphics_context_set_fill_color(ctx, black);
+    graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+
+    if (!data || !data->valid || dep_index < 0 || dep_index >= data->count) {
+        transit_ui_draw_status(ctx, bounds, "NO DATA");
+        return;
+    }
+
+    const Departure *dep = &data->departures[dep_index];
+    int y = DM_MARGIN_Y;
+
+    // Header: line number (large)
+    char sline[MAX_LINE_LEN];
+    dm_sanitize(dep->line, sline, sizeof(sline));
+    dm_text(ctx, DM_MARGIN_X, y, sline, content_w, DM_HEADER_DOT, amber);
+    y += dm_text_height(DM_HEADER_DOT) + DM_ROW_GAP;
+
+    // Separator
+    graphics_context_set_stroke_color(ctx, amber);
+    graphics_draw_line(ctx, GPoint(DM_MARGIN_X, y), GPoint(w - DM_MARGIN_X - 1, y));
+    y += DM_ROW_GAP + 2;
+
+    int rh = dm_text_height(DM_ROW_DOT) + DM_ROW_GAP + 4;
+
+    // Direction (full, untruncated — may wrap to label+value)
+    char sdir[MAX_DIR_LEN];
+    dm_sanitize(dep->direction, sdir, sizeof(sdir));
+    dm_text(ctx, DM_MARGIN_X, y, sdir, content_w, DM_ROW_DOT, amber);
+    y += rh;
+
+    // ETA
+    if (strcmp(dep->eta, "0") == 0) {
+        int pitch = DM_ROW_DOT + 1;
+        int icon_w = 8 * pitch;
+        dm_bus_icon(ctx, DM_MARGIN_X, y, DM_ROW_DOT, amber);
+        dm_text(ctx, DM_MARGIN_X + icon_w + pitch, y, "NOW", content_w,
+                DM_ROW_DOT, amber);
+    } else {
+        char seta[MAX_ETA_LEN + 6];
+        dm_sanitize(dep->eta, seta, sizeof(seta) - 6);
+        size_t len = strlen(seta);
+        if (len < sizeof(seta) - 6) {
+            seta[len] = ' ';
+            seta[len + 1] = 'M';
+            seta[len + 2] = 'I';
+            seta[len + 3] = 'N';
+            seta[len + 4] = '\0';
+        }
+        dm_text(ctx, DM_MARGIN_X, y, seta, content_w, DM_ROW_DOT, amber);
+    }
+    y += rh;
+
+    // Platform (if available)
+    if (dep->platform[0]) {
+        char label[MAX_PLATFORM_LEN + 4];
+        char splat[MAX_PLATFORM_LEN];
+        dm_sanitize(dep->platform, splat, sizeof(splat));
+        snprintf(label, sizeof(label), "GL %s", splat);
+        dm_text(ctx, DM_MARGIN_X, y, label, content_w, DM_ROW_DOT, amber);
+        y += rh;
+    }
+
+    // Station name at bottom
+    y += DM_ROW_GAP;
+    char san[MAX_STATION_LEN];
+    dm_sanitize(data->station, san, sizeof(san));
+    dm_text(ctx, DM_MARGIN_X, y, san, content_w, DM_ROW_DOT, amber);
 }
 
 void transit_ui_draw_status(GContext *ctx, GRect bounds, const char *message) {

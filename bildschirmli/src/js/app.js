@@ -418,7 +418,9 @@ function fetchDepartures(stationId) {
               '&fields[]=stationboard/to' +
               '&fields[]=stationboard/number' +
               '&fields[]=stationboard/stop/departureTimestamp' +
-              '&fields[]=stationboard/stop/prognosis/departureTimestamp';
+              '&fields[]=stationboard/stop/prognosis/departureTimestamp' +
+              '&fields[]=stationboard/stop/platform' +
+              '&fields[]=stationboard/stop/prognosis/platform';
 
     xhrGet(url, function(err, responseText) {
         if (err) { Pebble.sendAppMessage({ 'KEY_ERROR': 'API: ' + err }); return; }
@@ -450,7 +452,15 @@ function fetchDepartures(stationId) {
                     depTime = entry.stop.departureTimestamp;
             }
             var minutes = depTime > 0 ? Math.max(0, Math.floor((depTime - now) / 60)) : 99;
-            result += line + ':' + dir + ':' + minutes + ';';
+            // Platform: prefer realtime (track change), fall back to scheduled
+            var platform = '';
+            if (entry.stop) {
+                if (entry.stop.prognosis && entry.stop.prognosis.platform)
+                    platform = entry.stop.prognosis.platform;
+                else if (entry.stop.platform)
+                    platform = entry.stop.platform;
+            }
+            result += line + ':' + dir + ':' + minutes + ':' + platform + ';';
         }
         result += '%';
         Pebble.sendAppMessage({ 'KEY_DEPARTURES': result });
