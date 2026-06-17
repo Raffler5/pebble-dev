@@ -28,14 +28,17 @@ extern const uint8_t DM_BUS_ICON[DM_BUS_ROWS];
   #define DM_ROW_GAP     3
 #endif
 
-// Default amber phosphor color — GColorChromeYellow = 0xF8
-#define DM_COLOR_DEFAULT 0xF8
+// Defaults — GColorChromeYellow text on GColorBlack background
+#define DM_COLOR_DEFAULT    0xF8  // GColorChromeYellow
+#define DM_BG_COLOR_DEFAULT 0xC0  // GColorBlack
 
-// Runtime color — set from settings, used by all drawing
+// Runtime colors — set from settings, used by all drawing
 extern uint8_t dm_color_argb8;
+extern uint8_t dm_bg_color_argb8;
 
-// Convenience: get current color as GColor
+// Convenience macros
 #define DM_COLOR_CURRENT() ((GColor){ .argb = dm_color_argb8 })
+#define DM_BG_CURRENT()    ((GColor){ .argb = dm_bg_color_argb8 })
 
 // Character metrics
 int dm_char_width(uint8_t dot_size);

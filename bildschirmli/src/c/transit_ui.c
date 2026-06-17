@@ -17,7 +17,7 @@ int transit_ui_visible_rows(GRect bounds) {
 void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
                      const char *time_str) {
     GColor amber = DM_COLOR_CURRENT();
-    GColor black = GColorBlack;
+    GColor black = DM_BG_CURRENT();
     int w = bounds.size.w;
 
     // Black background
@@ -119,7 +119,7 @@ void transit_ui_draw(GContext *ctx, GRect bounds, const TransitData *data,
 
 void transit_ui_draw_status(GContext *ctx, GRect bounds, const char *message) {
     GColor amber = DM_COLOR_CURRENT();
-    GColor black = GColorBlack;
+    GColor black = DM_BG_CURRENT();
 
     graphics_context_set_fill_color(ctx, black);
     graphics_fill_rect(ctx, bounds, 0, GCornerNone);

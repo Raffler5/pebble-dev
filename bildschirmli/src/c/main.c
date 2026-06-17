@@ -25,6 +25,7 @@
 #define KEY_CFG_DEFAULT_STATION 4
 #define KEY_CFG_MAX_DISTANCE    5
 #define KEY_CFG_COLOR           6
+#define KEY_CFG_BG_COLOR        7
 
 #define REFRESH_INTERVAL_S 60
 #define SETTINGS_PKEY      1    // persist storage key
@@ -53,6 +54,7 @@ typedef struct {
     char default_station[64];
     int  max_distance_m;
     uint8_t color_argb8;
+    uint8_t bg_color_argb8;
 } UserSettings;
 
 static UserSettings s_settings;
@@ -61,15 +63,19 @@ static void settings_load(void) {
     s_settings.default_station[0] = '\0';
     s_settings.max_distance_m = 800;
     s_settings.color_argb8 = DM_COLOR_DEFAULT;
+    s_settings.bg_color_argb8 = DM_BG_COLOR_DEFAULT;
     if (persist_exists(SETTINGS_PKEY)) {
         persist_read_data(SETTINGS_PKEY, &s_settings, sizeof(s_settings));
     }
-    // Validate color — old persisted settings may have garbage in the new field.
-    // Valid ARGB8 has alpha bits = 0b11 (0xC0). If not, reset to default.
+    // Validate colors — old persisted settings may have garbage in new fields
     if ((s_settings.color_argb8 & 0xC0) != 0xC0) {
         s_settings.color_argb8 = DM_COLOR_DEFAULT;
     }
+    if ((s_settings.bg_color_argb8 & 0xC0) != 0xC0) {
+        s_settings.bg_color_argb8 = DM_BG_COLOR_DEFAULT;
+    }
     dm_color_argb8 = s_settings.color_argb8;
+    dm_bg_color_argb8 = s_settings.bg_color_argb8;
 }
 
 static void settings_save(void) {
@@ -237,7 +243,8 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
     Tuple *cfg_station = dict_find(iter, KEY_CFG_DEFAULT_STATION);
     Tuple *cfg_dist = dict_find(iter, KEY_CFG_MAX_DISTANCE);
     Tuple *cfg_color = dict_find(iter, KEY_CFG_COLOR);
-    if (cfg_station || cfg_dist || cfg_color) {
+    Tuple *cfg_bg = dict_find(iter, KEY_CFG_BG_COLOR);
+    if (cfg_station || cfg_dist || cfg_color || cfg_bg) {
         if (cfg_station) {
             snprintf(s_settings.default_station, sizeof(s_settings.default_station),
                      "%s", cfg_station->value->cstring);
@@ -248,6 +255,10 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
         if (cfg_color) {
             s_settings.color_argb8 = (uint8_t)cfg_color->value->int32;
             dm_color_argb8 = s_settings.color_argb8;
+        }
+        if (cfg_bg) {
+            s_settings.bg_color_argb8 = (uint8_t)cfg_bg->value->int32;
+            dm_bg_color_argb8 = s_settings.bg_color_argb8;
         }
         settings_save();
         // Redraw with new color

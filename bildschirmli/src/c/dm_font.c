@@ -2,8 +2,9 @@
 #include <ctype.h>
 #include <string.h>
 
-// Runtime color — defaults to chrome yellow, overridden by settings
+// Runtime colors — defaults overridden by settings
 uint8_t dm_color_argb8 = DM_COLOR_DEFAULT;
+uint8_t dm_bg_color_argb8 = DM_BG_COLOR_DEFAULT;
 
 // 5x7 dot-matrix font — ported from Bildschirmli SmallTV-Ultra.
 // Each row is a 5-bit bitmask (MSB = leftmost column).

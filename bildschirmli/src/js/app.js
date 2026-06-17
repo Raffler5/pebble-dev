@@ -24,7 +24,7 @@ function loadSettings() {
             return s;
         } catch(e) {}
     }
-    return { favorites: [], maxDistance: DEFAULT_MAX_DISTANCE, colorArgb8: 248 };
+    return { favorites: [], maxDistance: DEFAULT_MAX_DISTANCE, colorArgb8: 248, bgColorArgb8: 192 };
 }
 
 function saveSettings(s) {
@@ -92,10 +92,13 @@ function openConfigPage() {
         '<div id="results"></div>' +
         '<p class="desc">Search by name (e.g. "Bern Bahnhof", "Stettbach"). Tap a result to add it to favorites.</p>' +
 
-        // Color picker
-        '<h2>Display Color</h2>' +
-        '<div id="colors" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0"></div>' +
-        '<p class="desc">Tap to select. Current color is highlighted.</p>' +
+        // Color pickers
+        '<h2>Colors</h2>' +
+        '<div id="preview" style="padding:10px;border-radius:6px;margin:8px 0;text-align:center;font-family:monospace;font-size:14px;letter-spacing:2px">BILDSCHIRMLI 12:34</div>' +
+        '<p style="margin:8px 0 4px;color:#ffaa00;font-size:12px">TEXT COLOR</p>' +
+        '<div id="fgcolors" style="display:flex;flex-wrap:wrap;gap:3px;margin:0 0 12px"></div>' +
+        '<p style="margin:8px 0 4px;color:#ffaa00;font-size:12px">BACKGROUND</p>' +
+        '<div id="bgcolors" style="display:flex;flex-wrap:wrap;gap:3px;margin:0 0 8px"></div>' +
 
         // Max distance
         '<h2>Nearby Search Radius</h2>' +
@@ -111,20 +114,12 @@ function openConfigPage() {
         '<script>' +
         'var favs=' + favsJSON + ';' +
         'var searchResults=[];' +
-        'var selectedColor=' + (settings.colorArgb8 || 248) + ';' +
+        'var selFg=' + (settings.colorArgb8 || 248) + ';' +
+        'var selBg=' + (settings.bgColorArgb8 || 192) + ';' +
 
-        // Color palette — Pebble ARGB8 values (0b11RRGGBB) + CSS hex
-        'var colors=[' +
-        '{name:"Amber",argb:248,hex:"#FFAA00"},' +       // GColorChromeYellow
-        '{name:"Yellow",argb:252,hex:"#FFFF00"},' +      // GColorYellow
-        '{name:"Icterine",argb:253,hex:"#FFFF55"},' +    // GColorIcterine
-        '{name:"Rajah",argb:249,hex:"#FFAA55"},' +       // GColorRajah
-        '{name:"Orange",argb:244,hex:"#FF5500"},' +      // GColorOrange
-        '{name:"Spring",argb:236,hex:"#AAFF00"},' +      // GColorSpringBud
-        '{name:"Green",argb:220,hex:"#55FF00"},' +       // GColorGreen
-        '{name:"Cyan",argb:207,hex:"#00FFFF"},' +        // GColorCyan
-        '{name:"White",argb:255,hex:"#FFFFFF"}' +         // GColorWhite
-        '];' +
+        // Generate full 64-color Pebble palette
+        'var ch=["00","55","AA","FF"];' +
+        'function argb2hex(a){var r=(a>>4)&3,g=(a>>2)&3,b=a&3;return"#"+ch[r]+ch[g]+ch[b];}' +
 
         'function renderFavs(){' +
         'var el=document.getElementById("favs");' +
@@ -137,20 +132,22 @@ function openConfigPage() {
 
         'function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}' +
 
-        'function renderColors(){' +
-        'var el=document.getElementById("colors");var h="";' +
-        'for(var i=0;i<colors.length;i++){var c=colors[i];' +
-        'var sel=c.argb===selectedColor;' +
-        'h+="<div onclick=\\"pickColor("+i+")\\" style=\\"'+
-        'width:44px;height:44px;border-radius:6px;cursor:pointer;'+
-        'background:"+c.hex+";border:3px solid "+(sel?"#fff":"#333")+";'+
-        'display:flex;align-items:center;justify-content:center;'+
-        'font-size:10px;color:"+(sel?"#000":"transparent")+";\\">"+' +
-        '(sel?"\\u2713":"")+' +
-        '"</div>";}' +
+        'function renderPalette(elId,selected,onPick){' +
+        'var el=document.getElementById(elId);var h="";' +
+        'for(var r=0;r<4;r++)for(var g=0;g<4;g++)for(var b=0;b<4;b++){' +
+        'var a=0xC0|(r<<4)|(g<<2)|b;var hex=argb2hex(a);var sel=a===selected;' +
+        'h+="<div onclick=\\""+onPick+"("+a+")\\" style=\\"'+
+        'width:28px;height:28px;border-radius:3px;cursor:pointer;'+
+        'background:"+hex+";border:2px solid "+(sel?"#fff":"#222")+";'+
+        '\\"></div>";}' +
         'el.innerHTML=h;}' +
 
-        'function pickColor(i){selectedColor=colors[i].argb;renderColors();}' +
+        'function updatePreview(){' +
+        'var p=document.getElementById("preview");' +
+        'p.style.background=argb2hex(selBg);p.style.color=argb2hex(selFg);}' +
+
+        'function pickFg(a){selFg=a;renderPalette("fgcolors",selFg,"pickFg");updatePreview();}' +
+        'function pickBg(a){selBg=a;renderPalette("bgcolors",selBg,"pickBg");updatePreview();}' +
 
         'function rmFav(i){favs.splice(i,1);renderFavs();}' +
 
@@ -197,11 +194,15 @@ function openConfigPage() {
         'var s=JSON.stringify({' +
         'favorites:favs,' +
         'maxDistance:parseInt(document.getElementById("distance").value),' +
-        'colorArgb8:selectedColor' +
+        'colorArgb8:selFg,' +
+        'bgColorArgb8:selBg' +
         '});' +
         'document.location.href="pebblejs://close#"+encodeURIComponent(s);}' +
 
-        'renderFavs();renderColors();' +
+        'renderFavs();' +
+        'renderPalette("fgcolors",selFg,"pickFg");' +
+        'renderPalette("bgcolors",selBg,"pickBg");' +
+        'updatePreview();' +
         '</script></body></html>';
 
     Pebble.openURL('data:text/html,' + encodeURIComponent(html));
@@ -458,11 +459,12 @@ Pebble.addEventListener('webviewclosed', function(e) {
                     (settings.favorites ? settings.favorites.length : 0) + ' favorites' +
                     ', color=' + settings.colorArgb8);
 
-        // Send color to watch for persistent storage
-        if (settings.colorArgb8) {
-            Pebble.sendAppMessage({
-                'KEY_CFG_COLOR': settings.colorArgb8
-            });
+        // Send colors to watch for persistent storage
+        if (settings.colorArgb8 || settings.bgColorArgb8) {
+            var msg = {};
+            if (settings.colorArgb8) msg['KEY_CFG_COLOR'] = settings.colorArgb8;
+            if (settings.bgColorArgb8) msg['KEY_CFG_BG_COLOR'] = settings.bgColorArgb8;
+            Pebble.sendAppMessage(msg);
         }
 
         // Refresh stations with new settings
