@@ -15,11 +15,11 @@ extern const uint8_t DM_BUS_ICON[DM_BUS_ROWS];
 
 // Dot sizes — platform-adaptive
 #ifdef PBL_PLATFORM_EMERY
-  #define DM_HEADER_DOT  3
-  #define DM_ROW_DOT     2
+  #define DM_HEADER_DOT  2
+  #define DM_ROW_DOT     1
   #define DM_MARGIN_X    6
   #define DM_MARGIN_Y    6
-  #define DM_ROW_GAP     4
+  #define DM_ROW_GAP     3
 #else
   #define DM_HEADER_DOT  2
   #define DM_ROW_DOT     1
