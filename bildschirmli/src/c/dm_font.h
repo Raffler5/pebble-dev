@@ -28,8 +28,14 @@ extern const uint8_t DM_BUS_ICON[DM_BUS_ROWS];
   #define DM_ROW_GAP     3
 #endif
 
-// Amber phosphor color — closest to 0xFBE0 in Pebble's 64-color palette
-#define DM_COLOR_AMBER GColorChromeYellowARGB8
+// Default amber phosphor color — GColorChromeYellow = 0xF8
+#define DM_COLOR_DEFAULT 0xF8
+
+// Runtime color — set from settings, used by all drawing
+extern uint8_t dm_color_argb8;
+
+// Convenience: get current color as GColor
+#define DM_COLOR_CURRENT() ((GColor){ .argb = dm_color_argb8 })
 
 // Character metrics
 int dm_char_width(uint8_t dot_size);

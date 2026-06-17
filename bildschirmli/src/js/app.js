@@ -24,7 +24,7 @@ function loadSettings() {
             return s;
         } catch(e) {}
     }
-    return { favorites: [], maxDistance: DEFAULT_MAX_DISTANCE };
+    return { favorites: [], maxDistance: DEFAULT_MAX_DISTANCE, colorArgb8: 248 };
 }
 
 function saveSettings(s) {
@@ -92,6 +92,11 @@ function openConfigPage() {
         '<div id="results"></div>' +
         '<p class="desc">Search by name (e.g. "Bern Bahnhof", "Stettbach"). Tap a result to add it to favorites.</p>' +
 
+        // Color picker
+        '<h2>Display Color</h2>' +
+        '<div id="colors" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0"></div>' +
+        '<p class="desc">Tap to select. Current color is highlighted.</p>' +
+
         // Max distance
         '<h2>Nearby Search Radius</h2>' +
         '<p>Max distance: <span class="val" id="distval">' + settings.maxDistance + 'm</span></p>' +
@@ -105,8 +110,21 @@ function openConfigPage() {
 
         '<script>' +
         'var favs=' + favsJSON + ';' +
-        // Store search results so we can reference by index (avoids escaping issues)
         'var searchResults=[];' +
+        'var selectedColor=' + (settings.colorArgb8 || 248) + ';' +
+
+        // Color palette — Pebble ARGB8 values (0b11RRGGBB) + CSS hex
+        'var colors=[' +
+        '{name:"Amber",argb:248,hex:"#FFAA00"},' +       // GColorChromeYellow
+        '{name:"Yellow",argb:252,hex:"#FFFF00"},' +      // GColorYellow
+        '{name:"Icterine",argb:253,hex:"#FFFF55"},' +    // GColorIcterine
+        '{name:"Rajah",argb:249,hex:"#FFAA55"},' +       // GColorRajah
+        '{name:"Orange",argb:244,hex:"#FF5500"},' +      // GColorOrange
+        '{name:"Spring",argb:236,hex:"#AAFF00"},' +      // GColorSpringBud
+        '{name:"Green",argb:220,hex:"#55FF00"},' +       // GColorGreen
+        '{name:"Cyan",argb:207,hex:"#00FFFF"},' +        // GColorCyan
+        '{name:"White",argb:255,hex:"#FFFFFF"}' +         // GColorWhite
+        '];' +
 
         'function renderFavs(){' +
         'var el=document.getElementById("favs");' +
@@ -118,6 +136,21 @@ function openConfigPage() {
         'el.innerHTML=h;}' +
 
         'function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}' +
+
+        'function renderColors(){' +
+        'var el=document.getElementById("colors");var h="";' +
+        'for(var i=0;i<colors.length;i++){var c=colors[i];' +
+        'var sel=c.argb===selectedColor;' +
+        'h+="<div onclick=\\"pickColor("+i+")\\" style=\\"'+
+        'width:44px;height:44px;border-radius:6px;cursor:pointer;'+
+        'background:"+c.hex+";border:3px solid "+(sel?"#fff":"#333")+";'+
+        'display:flex;align-items:center;justify-content:center;'+
+        'font-size:10px;color:"+(sel?"#000":"transparent")+";\\">"+' +
+        '(sel?"\\u2713":"")+' +
+        '"</div>";}' +
+        'el.innerHTML=h;}' +
+
+        'function pickColor(i){selectedColor=colors[i].argb;renderColors();}' +
 
         'function rmFav(i){favs.splice(i,1);renderFavs();}' +
 
@@ -163,11 +196,12 @@ function openConfigPage() {
         'function submit(){' +
         'var s=JSON.stringify({' +
         'favorites:favs,' +
-        'maxDistance:parseInt(document.getElementById("distance").value)' +
+        'maxDistance:parseInt(document.getElementById("distance").value),' +
+        'colorArgb8:selectedColor' +
         '});' +
         'document.location.href="pebblejs://close#"+encodeURIComponent(s);}' +
 
-        'renderFavs();' +
+        'renderFavs();renderColors();' +
         '</script></body></html>';
 
     Pebble.openURL('data:text/html,' + encodeURIComponent(html));
@@ -421,7 +455,16 @@ Pebble.addEventListener('webviewclosed', function(e) {
         var settings = JSON.parse(decodeURIComponent(e.response));
         saveSettings(settings);
         console.log('Bildschirmli: settings saved, ' +
-                    (settings.favorites ? settings.favorites.length : 0) + ' favorites');
+                    (settings.favorites ? settings.favorites.length : 0) + ' favorites' +
+                    ', color=' + settings.colorArgb8);
+
+        // Send color to watch for persistent storage
+        if (settings.colorArgb8) {
+            Pebble.sendAppMessage({
+                'KEY_CFG_COLOR': settings.colorArgb8
+            });
+        }
+
         // Refresh stations with new settings
         findStations();
     } catch(ex) {

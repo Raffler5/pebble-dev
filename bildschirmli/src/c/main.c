@@ -24,6 +24,7 @@
 #define KEY_FETCH               3
 #define KEY_CFG_DEFAULT_STATION 4
 #define KEY_CFG_MAX_DISTANCE    5
+#define KEY_CFG_COLOR           6
 
 #define REFRESH_INTERVAL_S 60
 #define SETTINGS_PKEY      1    // persist storage key
@@ -51,6 +52,7 @@ static char s_time_buf[8];
 typedef struct {
     char default_station[64];
     int  max_distance_m;
+    uint8_t color_argb8;
 } UserSettings;
 
 static UserSettings s_settings;
@@ -58,9 +60,12 @@ static UserSettings s_settings;
 static void settings_load(void) {
     s_settings.default_station[0] = '\0';
     s_settings.max_distance_m = 800;
+    s_settings.color_argb8 = DM_COLOR_DEFAULT;
     if (persist_exists(SETTINGS_PKEY)) {
         persist_read_data(SETTINGS_PKEY, &s_settings, sizeof(s_settings));
     }
+    // Apply color
+    dm_color_argb8 = s_settings.color_argb8;
 }
 
 static void settings_save(void) {
@@ -227,7 +232,8 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
     // ── Settings from config page ──
     Tuple *cfg_station = dict_find(iter, KEY_CFG_DEFAULT_STATION);
     Tuple *cfg_dist = dict_find(iter, KEY_CFG_MAX_DISTANCE);
-    if (cfg_station || cfg_dist) {
+    Tuple *cfg_color = dict_find(iter, KEY_CFG_COLOR);
+    if (cfg_station || cfg_dist || cfg_color) {
         if (cfg_station) {
             snprintf(s_settings.default_station, sizeof(s_settings.default_station),
                      "%s", cfg_station->value->cstring);
@@ -235,9 +241,14 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context) {
         if (cfg_dist) {
             s_settings.max_distance_m = (int)cfg_dist->value->int32;
         }
+        if (cfg_color) {
+            s_settings.color_argb8 = (uint8_t)cfg_color->value->int32;
+            dm_color_argb8 = s_settings.color_argb8;
+        }
         settings_save();
-        APP_LOG(APP_LOG_LEVEL_INFO, "Settings saved: station='%s' dist=%d",
-                s_settings.default_station, s_settings.max_distance_m);
+        // Redraw with new color
+        mark_picker_dirty();
+        mark_deps_dirty();
         return;
     }
 

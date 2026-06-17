@@ -17,7 +17,8 @@
     "KEY_ERROR": 2,
     "KEY_FETCH": 3,
     "KEY_CFG_DEFAULT_STATION": 4,
-    "KEY_CFG_MAX_DISTANCE": 5
+    "KEY_CFG_MAX_DISTANCE": 5,
+    "KEY_CFG_COLOR": 6
   },
   "resources": {
     "media": []

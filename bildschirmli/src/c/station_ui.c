@@ -40,7 +40,7 @@ static void format_station_name(const StationListData *data, int idx,
 }
 
 void station_ui_draw(GContext *ctx, GRect bounds, const StationListData *data) {
-    GColor amber = (GColor){ .argb = DM_COLOR_AMBER };
+    GColor amber = DM_COLOR_CURRENT();
     GColor black = GColorBlack;
     int w = bounds.size.w;
 
