@@ -448,7 +448,10 @@ function fetchDepartures(stationId) {
             var entry = json.stationboard[i];
             var cat = entry.category || '';
             var num = entry.number || '?';
-            var line = cat + num;
+            // Only prefix category for rail (S, IR, IC, RE) — fits 3 chars ("S2", "IR3")
+            // Buses ("B") and trams ("T") use number only — "910" not "B910"
+            var line = (cat === 'S' || cat === 'IR' || cat === 'IC' || cat === 'RE')
+                ? cat + num : num;
             var dir = sanitizeDirection(stationName, entry.to);
             dir = dir.replace(/Bahnhof/g, 'Bhf').replace(/Strasse/g, 'Str').replace(/strasse/g, 'str');
             // ETA: scheduled time + delay = real departure
